@@ -20,16 +20,16 @@ jobs:
       - name: Setup Emscripten (C++ Compiler)
         uses: mymindstorm/setup-emsdk@v14
 
-      - name: Build Raylib Engine
+      - name: Build Raylib Engine for Web
         run: |
           git clone --depth 1 https://github.com/raysan5/raylib.git
           cd raylib/src
-          make PLATFORM=PLATFORM_WEB -B
+          emmake make PLATFORM=PLATFORM_WEB -B
 
       - name: Compile Game (C++ to Native Binary)
         run: |
           mkdir -p build
-          emcc main.cpp combat.cpp npc.cpp driving.cpp animations.cpp collision.cpp -o build/index.html -Os -Wall -Iraylib/src -Lraylib/src -lraylib -s USE_GLFW=3 -s ASYNCIFY -s TOTAL_MEMORY=134217728 -s FORCE_FILESYSTEM=1 --shell-file raylib/src/minshell.html --preload-file assets
+          emcc main.cpp combat.cpp npc.cpp driving.cpp animations.cpp collision.cpp -o build/index.html -Os -Wall -Iraylib/src -Lraylib/src -lraylib -s USE_GLFW=3 -s ASYNCIFY -s INITIAL_MEMORY=134217728 -s FORCE_FILESYSTEM=1 --shell-file raylib/src/minshell.html --preload-file assets
 
       - name: Upload Artifact
         uses: actions/upload-pages-artifact@v3
@@ -46,4 +46,3 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-
