@@ -10,14 +10,13 @@
 #include "driving.h"
 #include "npc.h"
 
-
-// --- متغيرات الحالة العامة (مكافئة لنطاق window في JS) ---
+// --- متغيرات الحالة العامة ---
 float targetCameraYaw = 0.0f;
 float targetCameraPitch = 0.3f;
 float currentCameraYaw = 0.0f;
 float currentCameraPitch = 0.3f;
 bool isDraggingCamera = false;
-const float cameraDist = 1.8f;
+const float cameraDist = 3.5f;
 
 Vector3 playerVelocity = { 0.0f, 0.0f, 0.0f };
 Vector3 currentCameraTarget = { 0.0f, 0.0f, 0.0f };
@@ -50,20 +49,34 @@ int main() {
     const int screenHeight = 1080;
     
     InitWindow(screenWidth, screenHeight, "PUBG Mobile TPS - Native C++ Engine");
-    SetTargetFPS(120); // قفل الإطارات على 120 فريم حقيقي
+    SetTargetFPS(120);
 
-    Camera3D camera = { 0 };
+    Camera3D camera = { { 0 } };
     camera.position = (Vector3){ 0.0f, 2.0f, 4.0f };
     camera.target = (Vector3){ 0.0f, 1.5f, 0.0f };
     camera.up = (Vector3){ 0.0f, 1.0f, 0.0f };
     camera.fovy = 75.0f;
     camera.projection = CAMERA_PERSPECTIVE;
 
-    // حالة شاشة التحميل
     bool isLoading = true;
     float loadProgress = 0.0f;
 
-    // مصفوفات البيئة والسيارات
+    // ==========================================
+    // 2. تحميل نماذج الـ GLB الحقيقية من مجلد assets
+    // ==========================================
+    Model playerModel = LoadModel("assets/player.glb");
+    Model houseModel  = LoadModel("assets/house.glb");
+    Model carModel    = LoadModel("assets/car2.glb");
+
+    // تهيئة الأنظمة الفرعية
+    CombatSystem::Init();
+    NPCSystem::Init();
+
+    std::vector<CarObject*> activeCars;
+    CarObject car1 = { {-20.0f, 0.0f, -10.0f}, {0}, {0}, {2.2f, 1.4f, 4.5f}, {0, 0.75f, 0}, 100.0f, true, false };
+    activeCars.push_back(&car1);
+    CarEngine::Init(activeCars);
+
     std::vector<Vector3> environmentPositions = {
         {10.0f, 0.0f, -15.0f},
         {30.0f, 0.0f, -40.0f},
@@ -81,13 +94,12 @@ int main() {
     double startTime = GetTime();
 
     // ==========================================
-    // حلقة التحديث الشاملة (مكافئة لدالة animate)
+    // حلقة التحديث الشاملة
     // ==========================================
     while (!WindowShouldClose()) {
         float delta = GetFrameTime();
         if (delta > 0.1f) delta = 0.1f; 
 
-        // معالجة شاشة التحميل (Loading Screen)
         if (isLoading) {
             loadProgress += delta * 60.0f; 
             if (loadProgress >= 100.0f) {
@@ -97,9 +109,12 @@ int main() {
                 }
             }
         } else {
-            // ==========================================
-            // 5. إعدادات الكاميرا والتحكم باللمس / الماوس
-            // ==========================================
+            // تحديث الأنظمة
+            CombatSystem::Update(delta);
+            NPCSystem::Update(delta);
+            CarEngine::Update(delta);
+
+            // إعدادات الكاميرا والتحكم باللمس / الماوس
             Vector2 mousePos = GetMousePosition();
             if (IsMouseButtonDown(MOUSE_BUTTON_LEFT) || GetTouchPointCount() > 0) {
                 if (mousePos.x > (float)screenWidth / 2.0f) {
@@ -117,7 +132,6 @@ int main() {
             if (isnan(targetCameraYaw)) targetCameraYaw = 0.0f;
             if (isnan(targetCameraPitch)) targetCameraPitch = 0.3f;
 
-            // نعومة الكاميرا (Damping) المتوافقة مع 120Hz
             float dampingFactor = 1.0f - expf(-25.0f * delta);
             
             float yawDiff = targetCameraYaw - currentCameraYaw;
@@ -127,16 +141,13 @@ int main() {
             float pitchDiff = targetCameraPitch - currentCameraPitch;
             currentCameraPitch += pitchDiff * dampingFactor;
 
-            // ==========================================
             // حركة اللاعب والفيزياء
-            // ==========================================
             Vector3 forwardVector = { -sinf(currentCameraYaw), 0.0f, -cosf(currentCameraYaw) };
             Vector3 rightVector = { cosf(currentCameraYaw), 0.0f, -sinf(currentCameraYaw) };
 
             if (!isDead) {
                 playerVelocity.y -= 25.0f * delta; 
 
-                // محاكاة عصا التحكم (Joystick) عبر أزرار لوحة المفاتيح للاختبار
                 if (IsKeyDown(KEY_W) || IsKeyDown(KEY_S) || IsKeyDown(KEY_A) || IsKeyDown(KEY_D)) {
                     joystickData.active = true;
                     joystickData.x = 0.0f; joystickData.y = 0.0f;
@@ -162,8 +173,8 @@ int main() {
                     if (Vector3LengthSqr(moveVector) > 0.01f) {
                         moveVector = Vector3Normalize(moveVector);
                         float targetRotation = atan2f(moveVector.x, moveVector.z);
+                        (void)targetRotation;
                         
-                        // تحديث موقع اللاعب وحركته
                         playerVelocity.x = moveVector.x * currentSpeed;
                         playerVelocity.z = moveVector.z * currentSpeed;
                     } else {
@@ -186,7 +197,6 @@ int main() {
                 }
             }
 
-            // تحديث موقع الكاميرا والمستهدف
             Vector3 idealTargetPos = playerPos;
             idealTargetPos.y += 1.5f;
             if (isDead) idealTargetPos.y = 0.5f;
@@ -208,31 +218,38 @@ int main() {
         }
 
         // ==========================================
-        // رسم العرض (Rendering Pass)
+        // 3. رسم العرض باستخدام نماذج الـ GLB الحقيقية
         // ==========================================
         BeginDrawing();
-        ClearBackground((Color){ 214, 234, 248, 255 }); // لون السماء/الضباب
+        ClearBackground((Color){ 135, 206, 235, 255 }); // لون السماء الطبيعي
 
         BeginMode3D(camera);
             DrawPlane((Vector3){ 0.0f, 0.0f, 0.0f }, (Vector2){ 50000.0f, 50000.0f }, LIGHTGRAY);
 
+            // رسم المباني والبيئة الحقيقية من house.glb
             for (const auto& pos : environmentPositions) {
-                DrawCube(pos, 4.0f, 6.0f, 4.0f, BLUE);
-                DrawCubeWires(pos, 4.0f, 6.0f, 4.0f, DARKBLUE);
+                DrawModel(houseModel, pos, 1.0f, WHITE);
             }
 
+            // رسم السيارات الحقيقية من car2.glb
             for (const auto& pos : carPositions) {
-                DrawCube(pos, 2.2f, 1.4f, 4.5f, RED);
-                DrawCubeWires(pos, 2.2f, 1.4f, 4.5f, MAROON);
+                DrawModel(carModel, pos, 1.0f, WHITE);
             }
 
+            // رسم شخصية اللاعب الحقيقية من player.glb بالمقياس المناسب
             if (!isScoped && !isDead) {
-                DrawCube(playerPos, 0.6f, 1.8f, 0.6f, DARKGREEN);
+                DrawModel(playerModel, playerPos, 0.01f, WHITE);
             }
+
+            CombatSystem::Draw3D();
         EndMode3D();
 
-        // واجهة الـ HUD وشاشة التحميل
-        DrawCircle(screenWidth / 2, screenHeight / 2, 2.0f, RED); // Crosshair
+        // واجهة الـ HUD والأنظمة مرسومة فوق الشاشة
+        CombatSystem::DrawUI(screenWidth, screenHeight);
+        NPCSystem::DrawHealthBars(camera);
+        CarEngine::UpdateAndDrawUI(screenWidth, screenHeight);
+
+        DrawCircle(screenWidth / 2, screenHeight / 2, 2.0f, RED);
 
         if (isLoading) {
             DrawRectangle(0, 0, screenWidth, screenHeight, (Color){ 10, 10, 12, 255 });
@@ -248,6 +265,10 @@ int main() {
         EndDrawing();
     }
 
+    // تنظيف الذاكرة عند الخروج
+    UnloadModel(playerModel);
+    UnloadModel(houseModel);
+    UnloadModel(carModel);
     CloseWindow();
     return 0;
 }
