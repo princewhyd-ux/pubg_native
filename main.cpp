@@ -20,6 +20,7 @@ bool isDraggingCamera = false;
 const float cameraDist = 1.8f;
 
 Vector3 playerVelocity = { 0.0f, 0.0f, 0.0f };
+Vector3 currentCameraTarget = { 0.0f, 0.0f, 0.0f };
 bool isAirborne = false;
 bool isDead = false;
 bool isFiring = false;
