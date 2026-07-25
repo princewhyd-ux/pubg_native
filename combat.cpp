@@ -20,6 +20,7 @@ extern bool isDead;
 extern float currentCameraYaw;
 extern float targetCameraYaw;
 extern float targetCameraPitch;
+extern float currentCameraPitch;
 extern bool isDraggingCamera;
 extern Vector3 playerVelocity;
 extern bool isFiring;
