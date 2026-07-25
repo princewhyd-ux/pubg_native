@@ -20,14 +20,15 @@ jobs:
       - name: Setup Emscripten (C++ Compiler)
         uses: mymindstorm/setup-emsdk@v14
 
-      - name: Build Raylib Engine for Web
+      - name: Build Raylib and Compile Game
         run: |
+          # 1. استنساخ وبناء مكتبة Raylib المخصصة للويب
           git clone --depth 1 https://github.com/raysan5/raylib.git
           cd raylib/src
           emmake make PLATFORM=PLATFORM_WEB -B
+          cd ../..
 
-      - name: Compile Game (C++ to Native Binary)
-        run: |
+          # 2. إنشاء مجلد البناء وتجميع اللعبة مع المكتبة مباشرة
           mkdir -p build
           emcc main.cpp combat.cpp npc.cpp driving.cpp animations.cpp collision.cpp raylib/src/libraylib.a -o build/index.html -Os -Wall -Iraylib/src -s USE_GLFW=3 -s ASYNCIFY -s INITIAL_MEMORY=134217728 -s FORCE_FILESYSTEM=1 --shell-file raylib/src/minshell.html --preload-file assets
 
