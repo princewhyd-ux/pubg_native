@@ -1,19 +1,12 @@
-#include "raylib.h"
+#include "collision.h"
 #include "raymath.h"
 #include <vector>
 #include <cmath>
 #include <algorithm>
 
-#include "animations.h"
-#include "collision.h"
-#include "combat.h"
-#include "driving.h"
-#include "npc.h"
-
-
 // ==========================================
 // محرك الفيزياء الاحترافي (نظام تجاهل السلالم Hover - C++ Native)
-// نسخة متطابقة 100% بدون أي تغيير في خوارزميات التصادم
+// متطابق 100% مع البنية المطلوبة لدوال اللعبة
 // ==========================================
 
 namespace GameCollision {
@@ -66,7 +59,7 @@ namespace GameCollision {
         return (u >= 0.0f) && (v >= 0.0f) && (u + v <= 1.0f);
     }
 
-    // أقرب نقطة على خط (Line3 closestPointToPoint)
+    // أقرب نقطة على خط
     Vector3 ClosestPointOnSegment(Vector3 p, Vector3 a, Vector3 b) {
         Vector3 ab = Vector3Subtract(b, a);
         float t = Vector3DotProduct(Vector3Subtract(p, a), ab) / Vector3LengthSqr(ab);
@@ -75,9 +68,9 @@ namespace GameCollision {
     }
 
     // ==========================================
-    // فئة الكبسولة (Capsule)
+    // فئة الكبسولة (Capsule) لحسابات التصادم الداخلية
     // ==========================================
-    struct Capsule {
+    struct CapsuleInternal {
         Vector3 start;
         Vector3 end;
         float radius;
@@ -133,7 +126,7 @@ namespace GameCollision {
     };
 
     // ==========================================
-    // فئة الشجرة الثمانية (Octree) للبحث المكاني الفائق
+    // الشجرة الثمانية (Octree)
     // ==========================================
     struct Octree {
         std::vector<Triangle3D> triangles;
@@ -146,14 +139,10 @@ namespace GameCollision {
             box = { {0,0,0}, {0,0,0} };
             bounds = { {INFINITY, INFINITY, INFINITY}, {-INFINITY, -INFINITY, -INFINITY} };
         }
-
         Octree(BoundingBox b) : box(b) {
             bounds = { {INFINITY, INFINITY, INFINITY}, {-INFINITY, -INFINITY, -INFINITY} };
         }
-
-        ~Octree() {
-            for (auto t : subTrees) delete t;
-        }
+        ~Octree() { for (auto t : subTrees) delete t; }
 
         void AddTriangle(Triangle3D triangle) {
             hasBounds = true;
@@ -191,7 +180,6 @@ namespace GameCollision {
 
         void Split(int level) {
             if (!hasBounds) return;
-            
             Vector3 halfsize = Vector3Scale(Vector3Subtract(box.max, box.min), 0.5f);
             std::vector<Octree*> newSubTrees;
 
@@ -210,18 +198,16 @@ namespace GameCollision {
             for (auto it = triangles.rbegin(); it != triangles.rend(); ++it) {
                 Triangle3D t = *it;
                 for (auto sub : newSubTrees) {
-                    if (IntersectsTriangleAABB(sub->box, t)) {
-                        sub->triangles.push_back(t);
-                    }
+                    if (IntersectsTriangleAABB(sub->box, t)) sub->triangles.push_back(t);
                 }
             }
             triangles.clear(); 
 
             for (auto sub : newSubTrees) {
                 int len = sub->triangles.size();
-                if (len > 8 && level < 16) { sub->Split(level + 1); }
-                if (len != 0) { subTrees.push_back(sub); }
-                else { delete sub; }
+                if (len > 8 && level < 16) sub->Split(level + 1);
+                if (len != 0) subTrees.push_back(sub);
+                else delete sub;
             }
         }
 
@@ -230,55 +216,42 @@ namespace GameCollision {
             Split(0);
         }
 
-        IntersectResult TriangleCapsuleIntersect(Capsule& capsule, Triangle3D t) {
+        IntersectResult TriangleCapsuleIntersect(CapsuleInternal& capsule, Triangle3D t) {
             IntersectResult result = {false, {0,0,0}, {0,0,0}, 0.0f};
             Vector3 point;
             Vector3 normal = GetTriangleNormal(t);
-            
             point = ProjectPointOnPlane(capsule.GetCenter(), normal, t.a);
             
             if (PointInTriangle(point, t)) {
                 Vector3 closest = ClosestPointOnSegment(point, capsule.start, capsule.end);
                 float distance = Vector3Distance(closest, point);
                 if (distance < capsule.radius) {
-                    result.hit = true;
-                    result.normal = normal;
-                    result.point = point;
-                    result.depth = capsule.radius - distance;
+                    result.hit = true; result.normal = normal; result.point = point; result.depth = capsule.radius - distance;
                     return result;
                 }
             }
             
             Vector3 edges[3][2] = { {t.a, t.b}, {t.b, t.c}, {t.c, t.a} };
-            float minDistance = INFINITY;
-            Vector3 minPoint = {0};
-            Vector3 minNormal = {0};
+            float minDistance = INFINITY; Vector3 minPoint = {0}; Vector3 minNormal = {0};
             
             for (int i = 0; i < 3; i++) {
                 Vector3 pt1, pt2;
                 capsule.LineLineMinimumPoints(capsule.start, capsule.end, edges[i][0], edges[i][1], pt1, pt2);
                 float dist = Vector3Distance(pt1, pt2);
                 if (dist < capsule.radius && dist < minDistance) {
-                    minDistance = dist;
-                    minPoint = pt2;
-                    minNormal = Vector3Normalize(Vector3Subtract(pt1, pt2));
+                    minDistance = dist; minPoint = pt2; minNormal = Vector3Normalize(Vector3Subtract(pt1, pt2));
                 }
             }
             
             if (minDistance < capsule.radius) {
-                result.hit = true;
-                result.normal = minNormal;
-                result.point = minPoint;
-                result.depth = capsule.radius - minDistance;
+                result.hit = true; result.normal = minNormal; result.point = minPoint; result.depth = capsule.radius - minDistance;
             }
-            
             return result;
         }
 
-        void GetCapsuleTriangles(Capsule& capsule, std::vector<Triangle3D>& resultTriangles) {
+        void GetCapsuleTriangles(CapsuleInternal& capsule, std::vector<Triangle3D>& resultTriangles) {
             for (auto subTree : subTrees) {
                 if (!capsule.IntersectsBox(subTree->box)) continue;
-                
                 if (!subTree->triangles.empty()) {
                     for (const auto& t : subTree->triangles) {
                         if (std::find(resultTriangles.begin(), resultTriangles.end(), t) == resultTriangles.end()) {
@@ -291,17 +264,12 @@ namespace GameCollision {
             }
         }
 
-        IntersectResult CapsuleIntersect(Capsule& capsule, std::vector<Triangle3D>& _capsuleTriangles) {
+        IntersectResult DoCapsuleIntersect(CapsuleInternal& capsule, std::vector<Triangle3D>& _capsuleTriangles) {
             _capsuleTriangles.clear();
-            
-            if (triangles.size() > 0) {
-                _capsuleTriangles = triangles;
-            } else {
-                GetCapsuleTriangles(capsule, _capsuleTriangles);
-            }
+            if (triangles.size() > 0) _capsuleTriangles = triangles;
+            else GetCapsuleTriangles(capsule, _capsuleTriangles);
             
             IntersectResult finalResult = {false, {0,0,0}, {0,0,0}, 0.0f};
-            
             for (const auto& t : _capsuleTriangles) {
                 IntersectResult result = TriangleCapsuleIntersect(capsule, t);
                 if (result.hit) {
@@ -311,22 +279,18 @@ namespace GameCollision {
                     finalResult.depth = result.depth;
                 }
             }
-            
             return finalResult;
         }
     };
 
-    // ==========================================
-    // الكائنات والوظائف العامة للمحرك (Global API)
-    // ==========================================
-    
+    // الكائن العام للـ Octree
     Octree octree;
-    
-    // 🔥 السحر هنا: رفعنا الكبسولة لتبدأ من ارتفاع 0.65 لتتجاهل السلالم، وعرضها 0.25 لتمر من الأبواب 🔥
-    Capsule capsule = { {0, 0.65f, 0}, {0, 1.4f, 0}, 0.25f };
-    std::vector<Triangle3D> _capsuleTrianglesBuffer; // للحفاظ على الذاكرة Zero Allocation
+    CapsuleInternal playerCapsule = { {0, 0.65f, 0}, {0, 1.4f, 0}, 0.25f };
+    std::vector<Triangle3D> _capsuleTrianglesBuffer;
 
-    // تعادل fromGraphNode في Three.js (تقرأ بيانات الـ Model في Raylib)
+    // ==========================================
+    // 1. الدالة الأساسية لإضافة المجسمات (API)
+    // ==========================================
     void AddCollider(Model model, Matrix transform) {
         for (int i = 0; i < model.meshCount; i++) {
             Mesh mesh = model.meshes[i];
@@ -338,11 +302,7 @@ namespace GameCollision {
                     Vector3 vA = { vertices[indices[j]*3], vertices[indices[j]*3+1], vertices[indices[j]*3+2] };
                     Vector3 vB = { vertices[indices[j+1]*3], vertices[indices[j+1]*3+1], vertices[indices[j+1]*3+2] };
                     Vector3 vC = { vertices[indices[j+2]*3], vertices[indices[j+2]*3+1], vertices[indices[j+2]*3+2] };
-                    
-                    vA = Vector3Transform(vA, transform);
-                    vB = Vector3Transform(vB, transform);
-                    vC = Vector3Transform(vC, transform);
-                    
+                    vA = Vector3Transform(vA, transform); vB = Vector3Transform(vB, transform); vC = Vector3Transform(vC, transform);
                     octree.AddTriangle({vA, vB, vC});
                 }
             } else {
@@ -350,11 +310,7 @@ namespace GameCollision {
                     Vector3 vA = { vertices[j], vertices[j+1], vertices[j+2] };
                     Vector3 vB = { vertices[j+3], vertices[j+4], vertices[j+5] };
                     Vector3 vC = { vertices[j+6], vertices[j+7], vertices[j+8] };
-                    
-                    vA = Vector3Transform(vA, transform);
-                    vB = Vector3Transform(vB, transform);
-                    vC = Vector3Transform(vC, transform);
-                    
+                    vA = Vector3Transform(vA, transform); vB = Vector3Transform(vB, transform); vC = Vector3Transform(vC, transform);
                     octree.AddTriangle({vA, vB, vC});
                 }
             }
@@ -362,38 +318,63 @@ namespace GameCollision {
         octree.Build();
     }
 
-    // الدالة الرئيسية لحل التصادم وحركة اللاعب
+    // ==========================================
+    // 2. معالجة حركة اللاعب ضد الجدران (السلالم Hover)
+    // ==========================================
     void ResolveMovement(Vector3& playerPos, Vector3& playerVelocity, float delta) {
         const int subSteps = 5; 
         float subDelta = delta / (float)subSteps;
 
-        capsule.start = Vector3Add(playerPos, {0.0f, 0.65f, 0.0f});
-        capsule.end = Vector3Add(playerPos, {0.0f, 1.4f, 0.0f});
+        playerCapsule.start = Vector3Add(playerPos, {0.0f, 0.65f, 0.0f});
+        playerCapsule.end = Vector3Add(playerPos, {0.0f, 1.4f, 0.0f});
 
         for (int i = 0; i < subSteps; i++) {
-            capsule.Translate(Vector3Scale(playerVelocity, subDelta));
+            playerCapsule.Translate(Vector3Scale(playerVelocity, subDelta));
             
             for(int c = 0; c < 3; c++) {
-                IntersectResult result = octree.CapsuleIntersect(capsule, _capsuleTrianglesBuffer);
+                IntersectResult result = octree.DoCapsuleIntersect(playerCapsule, _capsuleTrianglesBuffer);
                 if (result.hit) {
-                    capsule.Translate(Vector3Scale(result.normal, result.depth));
+                    playerCapsule.Translate(Vector3Scale(result.normal, result.depth));
                     float dot = Vector3DotProduct(result.normal, playerVelocity);
                     playerVelocity = Vector3Add(playerVelocity, Vector3Scale(result.normal, -dot));
-                } else {
-                    break;
-                }
+                } else break;
             }
         }
-
-        // إرجاع الإحداثيات (بدون المحور Y لأنه يتم معالجته في main.cpp)
-        playerPos = Vector3Subtract(capsule.start, {0.0f, 0.65f, 0.0f});
+        playerPos = Vector3Subtract(playerCapsule.start, {0.0f, 0.65f, 0.0f});
     }
 
-    // دالة مساعدة لعمل Raycast سريع من الـ Octree (تُستخدم في نظام قيادة السيارات)
+    // ==========================================
+    // 3. تصادم السيارات الخارجي (CapsuleIntersect API للسيارات)
+    // ==========================================
+    bool CapsuleIntersect(Vector3 start, Vector3 end, float radius, Vector3& outNormal, float& outDepth) {
+        CapsuleInternal tempCapsule = { start, end, radius };
+        std::vector<Triangle3D> tempBuffer;
+        
+        IntersectResult result = octree.DoCapsuleIntersect(tempCapsule, tempBuffer);
+        if (result.hit) {
+            outNormal = result.normal;
+            outDepth = result.depth;
+            return true;
+        }
+        return false;
+    }
+
+    // ==========================================
+    // 4. إطلاق شعاع للكشف عن الأرضيات أو الطلقات
+    // ==========================================
     bool Raycast(Vector3 origin, Vector3 dir, Vector3& outHitPoint) {
-        // (يمكن بناء خوارزمية Ray-AABB داخل الـ Octree هنا، ولكن للتبسيط يتم 
-        // استدعاء دالة Raylib الافتراضية للفيزياء أو فحص المثلثات مباشرة)
-        // تم ترك هذا الجزء كـ Placeholder لتتوافق مع دوال Raylib المدمجة
+        // بما أن الـ Octree معقد لحسابات الـ Ray السريعة، نستخدم خط مستقيم يحاكي كبسولة رقيقة جداً وموجهة لأسفل
+        CapsuleInternal rayCapsule = { origin, Vector3Add(origin, Vector3Scale(Vector3Normalize(dir), 200.0f)), 0.01f };
+        std::vector<Triangle3D> tempBuffer;
+        
+        IntersectResult result = octree.DoCapsuleIntersect(rayCapsule, tempBuffer);
+        if (result.hit) {
+            outHitPoint = result.point;
+            return true;
+        }
+        
+        outHitPoint = origin; // نقطة وهمية في حالة عدم الإصابة
         return false; 
     }
+
 }
