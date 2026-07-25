@@ -1,4 +1,4 @@
-name: Build Android APK
+name: Build Real Android APK
 
 on:
   push:
@@ -9,17 +9,46 @@ jobs:
   build-apk:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Code
+      - name: Checkout User Code
         uses: actions/checkout@v4
 
-      - name: Archive Project Files and Assets
-        run: |
-          mkdir -p dist
-          # ضغد كافة ملفات الكود ومجلد الموارد assets والملفات الهندسية في ملف واحد
-          zip -r dist/pubg-native-game.zip *.cpp *.h assets/ CMakeLists.txt 2>/dev/null || true
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
 
-      - name: Upload Artifact
+      - name: Set up Android SDK & NDK
+        uses: android-actions/setup-android@v3
+
+      - name: Prepare Raylib and Android Project Template
+        run: |
+          # استنساخ محرك Raylib للحصول على قالب الأندرويد الجاهز
+          git clone --depth 1 https://github.com/raysan5/raylib.git
+          
+          # نقل ملفات الكود الخاصة بك وملفات الرأس إلى مسار الـ JNI في القالب
+          TARGET_DIR="raylib/examples/templates/android/app/src/main"
+          
+          mkdir -p $TARGET_DIR/cpp
+          mkdir -p $TARGET_DIR/assets
+          
+          cp *.cpp $TARGET_DIR/cpp/ 2>/dev/null || true
+          cp *.h $TARGET_DIR/cpp/ 2>/dev/null || true
+          cp CMakeLists.txt $TARGET_DIR/cpp/ 2>/dev/null || true
+          
+          # نقل مجلد الموارد الخاص بك (الـ assets والـ glb)
+          if [ -d "assets" ]; then
+            cp -r assets/* $TARGET_DIR/assets/
+          fi
+
+      - name: Build APK with Gradle
+        run: |
+          cd raylib/examples/templates/android
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: pubg-native-package
-          path: dist/pubg-native-game.zip
+          name: pubg-native-apk
+          path: raylib/examples/templates/android/app/build/outputs/apk/debug/app-debug.apk
