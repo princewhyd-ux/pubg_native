@@ -21,56 +21,107 @@ jobs:
       - name: Set up Android SDK & NDK
         uses: android-actions/setup-android@v3
 
-      - name: Create Complete Android Project Structure
+      - name: Prepare Project Structure and Raylib Source
         run: |
-          # إنشاء هيكل تطبيق أندرويد قياسي ونظيف بالكامل من الصفر
+          # 1. استنساخ محرك Raylib للحصول على ملفات المصدر الأساسية
+          git clone --depth 1 https://github.com/raysan5/raylib.git
+
+          # 2. إنشاء هيكل مشروع أندرويد قياسي
           mkdir -p android_app/app/src/main/cpp
           mkdir -p android_app/app/src/main/assets
-          mkdir -p android_app/app/src/main/java/com/pubg/native
 
-          # نسخ كافة ملفات الكود والرأس الخاصة بك
+          # 3. نقل كود اللعبة وملفات الرأس وملفات Raylib للـ C++
           cp *.cpp android_app/app/src/main/cpp/ 2>/dev/null || true
           cp *.h android_app/app/src/main/cpp/ 2>/dev/null || true
-          
-          # نسخ مجلد الموارد assets والملفات الثلاثية الأبعاد glb
+          cp -r raylib/src android_app/app/src/main/cpp/raylib_src
+
+          # 4. نقل مجلد الـ assets وملفات الـ glb بالكامل
           if [ -d "assets" ]; then
             cp -r assets/* android_app/app/src/main/assets/
           fi
 
-          # كتابة ملف الإعدادات الرئيسي لـ CMake لتجميع كود الـ C++
+          # 5. إعداد ملف settings.gradle مع تعريف مصادر الـ Plugins لتجنب خطأ الإيجاد
+          cat << 'EOF' > android_app/settings.gradle
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOSITORIES)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "pubg_native"
+          include ':app'
+          EOF
+
+          # 6. كتابة ملف CMakeLists.txt لتجميع كود الـ C++ مع مكتبة Raylib لنظام أندرويد
           cat << 'EOF' > android_app/app/src/main/cpp/CMakeLists.txt
           cmake_minimum_required(VERSION 3.22.1)
           project(pubg_native)
-          add_library(pubg_native SHARED main.cpp combat.cpp npc.cpp driving.cpp animations.cpp collision.cpp)
+
+          set(CMAKE_CXX_STANDARD 17)
+          add_definitions(-DPLATFORM_ANDROID -DGRAPHICS_API_OPENGL_ES2)
+
+          include_directories(raylib_src raylib_src/external/glfw/include)
+
+          add_library(pubg_native SHARED
+              main.cpp
+              combat.cpp
+              npc.cpp
+              driving.cpp
+              animations.cpp
+              collision.cpp
+              raylib_src/rcore.c
+              raylib_src/rshapes.c
+              raylib_src/rtextures.c
+              raylib_src/rtext.c
+              raylib_src/rmodels.c
+              raylib_src/raudio.c
+          )
+
           find_library(log-lib log)
           find_library(glesv-lib GLESv2)
+          find_library(egl-lib EGL)
           find_library(android-lib android)
-          target_link_libraries(pubg_native ${log-lib} ${glesv-lib} ${android-lib})
+          find_library(m-lib m)
+
+          target_link_libraries(pubg_native
+              ${log-lib}
+              ${glesv-lib}
+              ${egl-lib}
+              ${android-lib}
+              ${m-lib}
+          )
           EOF
 
-          # كتابة ملف AndroidManifest الأساسي
+          # 7. كتابة ملف AndroidManifest الأساسي لتشغيل اللعبة كنشاط أصلي (Native Activity)
           cat << 'EOF' > android_app/app/src/main/AndroidManifest.xml
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.INTERNET" />
+              <uses-feature android:glEsVersion="0x00020000" android:required="true" />
               <application android:allowBackup="true" android:label="PUBG Native" android:icon="@mipmap/ic_launcher">
-                  <activity android:name=".MainActivity" android:exported="true" android:theme="@style/Theme.AppCompat.NoActionBar">
+                  <activity android:name="android.app.NativeActivity"
+                            android:configChanges="orientation|keyboardHidden|screenSize"
+                            android:exported="true"
+                            android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
+                      <meta-data android:name="android.app.lib_name" android:value="pubg_native" />
                       <intent-filter>
-                        <action android:name="android.intent.action.MAIN" />
-                        <category android:name="android.intent.category.LAUNCHER" />
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
                       </intent-filter>
                   </activity>
               </application>
           </manifest>
           EOF
 
-          # كتابة ملف Gradle للبناء
-          cat << 'EOF' > android_app/build.gradle
-          plugins {
-              id 'com.android.application' version '8.1.1' apply false
-          }
-          EOF
-
+          # 8. كتابة ملفات بناء Gradle للإصدار
           cat << 'EOF' > android_app/app/build.gradle
           plugins {
               id 'com.android.application'
@@ -86,14 +137,14 @@ jobs:
                   versionName "1.0"
                   externalNativeBuild {
                       cmake {
-                          cppFlags ""
+                          cppFlags "-std=c++17"
                       }
                   }
               }
               buildTypes {
-                release {
-                    minifyEnabled false
-                }
+                  release {
+                      minifyEnabled false
+                  }
               }
               externalNativeBuild {
                   cmake {
@@ -107,7 +158,7 @@ jobs:
           }
           EOF
 
-          # إنشاء ملف إعدادات التوزيع Gradle Wrapper
+          # إعداد Gradle Wrapper وبدء البناء
           cd android_app
           gradle wrapper --gradle-version 8.3
           chmod +x gradlew
