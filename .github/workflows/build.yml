@@ -1,47 +1,58 @@
 name: Build Android APK
 
 on:
-  push:
-    branches: [ "main" ]
   workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
 
 jobs:
-  build-apk:
+  build:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout Repository
+      - name: Checkout Source
         uses: actions/checkout@v4
 
-      - name: Set up JDK 17
+      - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
-          java-version: '17'
+          distribution: temurin
+          java-version: 17
 
-      - name: Set up Android SDK & NDK
+      - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Prepare Project Structure and Raylib Source
+      - name: Install CMake
+        run: sdkmanager "cmake;3.22.1"
+
+      - name: Install NDK
+        run: sdkmanager "ndk;25.1.8937393"
+
+      - name: Clone Raylib
         run: |
-          # 1. استنساخ محرك Raylib للحصول على ملفات المصدر الأساسية
-          git clone --depth 1 https://github.com/raysan5/raylib.git
+          git clone --depth=1 https://github.com/raysan5/raylib.git
 
-          # 2. إنشاء هيكل مشروع أندرويد قياسي
-          mkdir -p android_app/app/src/main/cpp
-          mkdir -p android_app/app/src/main/assets
+      - name: Create Android Project
+        run: |
 
-          # 3. نقل كود اللعبة وملفات الرأس وملفات Raylib للـ C++
-          cp *.cpp android_app/app/src/main/cpp/ 2>/dev/null || true
-          cp *.h android_app/app/src/main/cpp/ 2>/dev/null || true
-          cp -r raylib/src android_app/app/src/main/cpp/raylib_src
+          mkdir -p app/src/main/cpp
+          mkdir -p app/src/main/assets
+          mkdir -p app/src/main/res/values
+          mkdir -p app/src/main/res/mipmap-anydpi-v26
 
-          # 4. نقل مجلد الـ assets وملفات الـ glb بالكامل
-          if [ -d "assets" ]; then
-            cp -r assets/* android_app/app/src/main/assets/
+          cp *.cpp app/src/main/cpp/ 2>/dev/null || true
+          cp *.h app/src/main/cpp/ 2>/dev/null || true
+          cp CMakeLists.txt app/src/main/cpp/
+
+          cp -r raylib/src app/src/main/cpp/raylib_src
+
+          if [ -d assets ]; then
+            cp -r assets/* app/src/main/assets/
           fi
 
-          # 5. إعداد ملف settings.gradle بدون الخصائص القديمة لضمان التوافق مع Gradle الحديث
-          cat << 'EOF' > android_app/settings.gradle
+          cat > settings.gradle <<EOF
           pluginManagement {
               repositories {
                   google()
@@ -49,124 +60,127 @@ jobs:
                   gradlePluginPortal()
               }
           }
-          rootProject.name = "pubg_native"
-          include ':app'
+
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+
+          rootProject.name="PUBGNative"
+          include(":app")
           EOF
 
-          # 6. كتابة ملف CMakeLists.txt لتجميع كود الـ C++ مع مكتبة Raylib لنظام أندرويد
-          cat << 'EOF' > android_app/app/src/main/cpp/CMakeLists.txt
-          cmake_minimum_required(VERSION 3.22.1)
-          project(pubg_native)
-
-          set(CMAKE_CXX_STANDARD 17)
-          add_definitions(-DPLATFORM_ANDROID -DGRAPHICS_API_OPENGL_ES2)
-
-          include_directories(raylib_src raylib_src/external/glfw/include)
-
-          add_library(pubg_native SHARED
-              main.cpp
-              combat.cpp
-              npc.cpp
-              driving.cpp
-              animations.cpp
-              collision.cpp
-              raylib_src/rcore.c
-              raylib_src/rshapes.c
-              raylib_src/rtextures.c
-              raylib_src/rtext.c
-              raylib_src/rmodels.c
-              raylib_src/raudio.c
-          )
-
-          find_library(log-lib log)
-          find_library(glesv-lib GLESv2)
-          find_library(egl-lib EGL)
-          find_library(android-lib android)
-          find_library(m-lib m)
-
-          target_link_libraries(pubg_native
-              ${log-lib}
-              ${glesv-lib}
-              ${egl-lib}
-              ${android-lib}
-              ${m-lib}
-          )
+          cat > build.gradle <<EOF
+          plugins {
+              id 'com.android.application' version '8.1.1' apply false
+          }
           EOF
 
-          # 7. كتابة ملف AndroidManifest الأساسي لتشغيل اللعبة كنشاط أصلي (Native Activity)
-          cat << 'EOF' > android_app/app/src/main/AndroidManifest.xml
-          <?xml version="1.0" encoding="utf-8"?>
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-              <uses-permission android:name="android.permission.INTERNET" />
-              <uses-feature android:glEsVersion="0x00020000" android:required="true" />
-              <application android:allowBackup="true" android:label="PUBG Native" android:icon="@mipmap/ic_launcher">
-                  <activity android:name="android.app.NativeActivity"
-                            android:configChanges="orientation|keyboardHidden|screenSize"
-                            android:exported="true"
-                            android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
-                      <meta-data android:name="android.app.lib_name" android:value="pubg_native" />
-                      <intent-filter>
-                          <action android:name="android.intent.action.MAIN" />
-                          <category android:name="android.intent.category.LAUNCHER" />
-                      </intent-filter>
-                  </activity>
-              </application>
-          </manifest>
+          cat > gradle.properties <<EOF
+          org.gradle.jvmargs=-Xmx4096m
+          android.useAndroidX=true
+          android.enableJetifier=true
           EOF
 
-          # 8. كتابة ملفات بناء Gradle للإصدار مع تحديد مستودعات Google و Maven
-          cat << 'EOF' > android_app/app/build.gradle
+          cat > app/build.gradle <<EOF
           plugins {
               id 'com.android.application'
           }
-          repositories {
-              google()
-              mavenCentral()
-          }
+
           android {
-              namespace 'com.pubg.native'
+
+              namespace "com.pubg.nativegame"
+
               compileSdk 34
+
               defaultConfig {
-                  applicationId "com.pubg.native"
-                  minSdk 21
+
+                  applicationId "com.pubg.nativegame"
+
+                  minSdk 24
                   targetSdk 34
+
                   versionCode 1
                   versionName "1.0"
+
                   externalNativeBuild {
                       cmake {
-                          cppFlags "-std=c++17"
+                          cppFlags "-std=c++17 -O3"
                       }
                   }
               }
+
               buildTypes {
                   release {
                       minifyEnabled false
                   }
               }
+
               externalNativeBuild {
                   cmake {
-                      path file('src/main/cpp/CMakeLists.txt')
-                      version '3.22.1'
+                      path "src/main/cpp/CMakeLists.txt"
+                      version "3.22.1"
                   }
               }
-          }
-          dependencies {
-              implementation 'androidx.appcompat:appcompat:1.6.1'
+
+              ndkVersion "25.1.8937393"
           }
           EOF
 
-          # إعداد Gradle Wrapper وبدء البناء
-          cd android_app
-          gradle wrapper --gradle-version 8.3
-          chmod +x gradlew
+          cat > app/src/main/AndroidManifest.xml <<EOF
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-      - name: Build APK via Gradle Wrapper
+          <uses-feature
+              android:glEsVersion="0x00020000"
+              android:required="true"/>
+
+          <application
+              android:label="PUBG Native">
+
+              <activity
+                  android:name="android.app.NativeActivity"
+                  android:exported="true"
+                  android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
+
+                  <meta-data
+                      android:name="android.app.lib_name"
+                      android:value="pubg_native"/>
+
+                  <intent-filter>
+                      <action android:name="android.intent.action.MAIN"/>
+                      <category android:name="android.intent.category.LAUNCHER"/>
+                  </intent-filter>
+
+              </activity>
+
+          </application>
+
+          </manifest>
+          EOF
+
+          cat > app/src/main/res/values/strings.xml <<EOF
+          <resources>
+              <string name="app_name">PUBG Native</string>
+          </resources>
+          EOF
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Generate Wrapper
         run: |
-          cd android_app
-          ./gradlew assembleDebug --no-daemon
+          gradle wrapper --gradle-version 8.3
 
-      - name: Upload APK Artifact
+      - name: Build APK
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --stacktrace
+
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: pubg-native-apk
-          path: android_app/app/build/outputs/apk/debug/app-debug.apk
+          name: PUBG-Native-APK
+          path: app/build/outputs/apk/debug/app-debug.apk
