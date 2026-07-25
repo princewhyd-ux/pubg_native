@@ -1,387 +1,313 @@
 #include "raylib.h"
 #include "raymath.h"
 #include <vector>
-#include <string>
 #include <cmath>
-#include <algorithm>
+#include <string>
 
+#include "combat.h"
 #include "animations.h"
 #include "collision.h"
-#include "combat.h"
 #include "driving.h"
 #include "npc.h"
 
-
 // ==========================================
-// نظام القتال فائق الاحترافية (Advanced Combat System V5.0 - C++ Native)
-// أداء 120 إطار (Zero Allocation) + دقة متناهية (CCD) + ارتداد
+// المتغيرات الخارجية (External Bindings)
+// مربوطة مباشرة بـ main.cpp و driving.cpp
 // ==========================================
+extern Camera3D camera;
+extern Vector3 playerPos;
+extern bool isDead;
+extern float currentCameraYaw;
+extern float targetCameraYaw;
+extern float targetCameraPitch;
+extern bool isDraggingCamera;
+extern Vector3 playerVelocity;
+extern bool isFiring;
+extern bool isScoped;
 
 namespace CombatSystem {
 
-    // 🔥 إعدادات السلاح (متطابقة 100%) 🔥
-    struct WeaponStats {
-        int damage = 34;           
-        float headshotMultiplier = 3.0f; 
-        float fireRate = 0.1f;        
-        float bulletSpeed = 500.0f;   
-        int magSize = 30;          
-        float reloadTime = 2.2f;      
-        float recoilVertical = 0.010f;   
-        float recoilHorizontal = 0.002f; 
-        float baseSpread = 0.001f;     
-    };
-
-    // هيكل الرصاصة للـ Object Pool
-    struct Bullet {
-        bool active = false;
-        Vector3 position = {0,0,0};
-        Vector3 velocity = {0,0,0};
-        float distanceTraveled = 0.0f;
-        float maxDistance = 600.0f;
-        bool isPlayerBullet = true;
-        int damage = 0;
-        Matrix transform; // لاتجاه الرصاصة أثناء الرسم
-    };
-
-    // هيكل الدخان/الدم للـ Object Pool
-    struct Smoke {
-        bool active = false;
-        Vector3 position = {0,0,0};
-        Vector3 velocity = {0,0,0};
-        float life = 0.0f;
-        bool isBlood = false;
-        float scale = 1.0f;
-    };
-
-    // المتغيرات الأساسية
-    const int bulletPoolSize = 200;
-    const int smokePoolSize = 250;
-    std::vector<Bullet> bulletPool(bulletPoolSize);
-    std::vector<Smoke> smokePool(smokePoolSize);
-    std::vector<Bullet*> activeBullets;
-    std::vector<Smoke*> activeSmokes;
-
-    WeaponStats weaponStats;
+    // حالة اللاعب والسلاح
+    int playerHealth = 100;
     int currentAmmo = 30;
     bool isReloading = false;
-    double lastFireTime = 0.0;
-    float reloadTimer = 0.0f; // بديل لـ setTimeout في C++
+    double lastFireTime = 0;
+    double reloadStartTime = 0;
 
-    // الأسلحة والواجهة
+    WeaponStats weaponStats;
     Model weaponModel;
-    Vector3 weaponOffsetPos = { 0.0f, 0.0f, 0.0f };
     Texture2D weaponIcon;
 
-    // 🔥 سر الـ 120 إطار: متجهات محجوزة مسبقاً (Zero Allocation) 🔥
-    Vector3 _moveDist = {0}; 
-    Vector3 _tempDir = {0}; 
-    Vector3 _closestPt = {0};      
-    Vector3 _v1 = {0}; // متجه مساعد 1
-    Vector3 _v2 = {0}; // متجه مساعد 2
-    Vector3 _v3 = {0}; // متجه مساعد 3
+    // مسابح الكائنات (Object Pools for Zero Allocation)
+    const int BULLET_POOL_SIZE = 200;
+    const int SMOKE_POOL_SIZE = 250;
+    std::vector<BulletObject> bulletPool(BULLET_POOL_SIZE);
+    std::vector<SmokeParticle> smokePool(SMOKE_POOL_SIZE);
 
-    // متغيرات خارجية (يجب ربطها مع main.cpp)
-    extern Camera3D camera;
-    extern Vector3 playerPos;
-    extern float currentCameraYaw;
-    extern float targetCameraYaw;
-    extern float targetCameraPitch;
-    extern bool isDraggingCamera;
-    extern Vector3 playerVelocity;
-    extern bool isDead;
-    extern bool isFiring;
-    extern int playerHealth;
-    extern float playerRotationY; // دوران اللاعب
-
-    // -----------------------------------------------------
-    // دالة رياضية مساعدة للـ CCD (أقرب نقطة على خط - Line3)
-    // -----------------------------------------------------
-    Vector3 ClosestPointOnLineSegment(Vector3 p, Vector3 a, Vector3 b) {
-        Vector3 ab = Vector3Subtract(b, a);
-        float t = Vector3DotProduct(Vector3Subtract(p, a), ab) / Vector3LengthSqr(ab);
-        t = Clamp(t, 0.0f, 1.0f);
-        return Vector3Add(a, Vector3Scale(ab, t));
-    }
-
-    // دالة لاستخراج عشوائي دقيق
-    float GetRandomFloat(float min, float max) {
-        return min + static_cast<float>(GetRandomValue(0, 10000)) / 10000.0f * (max - min);
-    }
-
+    // ==========================================
+    // تهيئة النظام
+    // ==========================================
     void Init() {
-        // تهيئة الواجهة
-        weaponIcon = LoadTexture("assets/hud/weapon_icon.png");
-        
-        // تهيئة السلاح (بدون Scale لأننا نجهزه أثناء الرسم)
-        weaponModel = LoadModel("assets/weapon.glb");
-
-        // تهيئة حوض الكائنات (Object Pool)
-        for(int i=0; i<bulletPoolSize; i++) bulletPool[i].active = false;
-        for(int i=0; i<smokePoolSize; i++) smokePool[i].active = false;
-
         playerHealth = 100;
         currentAmmo = weaponStats.magSize;
+        isReloading = false;
+        
+        // إعداد المسابح
+        for (int i = 0; i < BULLET_POOL_SIZE; i++) bulletPool[i].active = false;
+        for (int i = 0; i < SMOKE_POOL_SIZE; i++) smokePool[i].active = false;
+
+        weaponModel = LoadModel("assets/weapon.glb");
+        weaponIcon = LoadTexture("assets/hud/weapon_icon.png");
     }
 
-    Bullet* GetAvailableBullet() {
-        for (int i = 0; i < bulletPoolSize; i++) {
-            if (!bulletPool[i].active) return &bulletPool[i];
-        }
-        return nullptr;
-    }
-
-    Smoke* GetAvailableSmoke() {
-        for (int i = 0; i < smokePoolSize; i++) {
-            if (!smokePool[i].active) return &smokePool[i];
-        }
-        return nullptr;
-    }
-
-    void ReloadWeapon() {
-        if (isReloading || currentAmmo == weaponStats.magSize) return;
-        isReloading = true;
-        reloadTimer = weaponStats.reloadTime; // بدء العداد
-    }
-
+    // ==========================================
+    // حساب الارتداد (Recoil)
+    // ==========================================
     void ApplyRecoil() {
-        if (isDraggingCamera) return; 
+        if (isDraggingCamera) return;
         targetCameraPitch -= weaponStats.recoilVertical;
-        targetCameraYaw += GetRandomFloat(-0.5f, 0.5f) * weaponStats.recoilHorizontal;
+        float randomHorizontal = (float)GetRandomValue(-100, 100) / 100000.0f; 
+        targetCameraYaw += randomHorizontal * weaponStats.recoilHorizontal * 1000.0f;
     }
 
-    void SpawnBullet(Vector3 startPos, Vector3 targetPos, bool isPlayerBullet, int baseDamage) {
-        _v1 = Vector3Normalize(Vector3Subtract(targetPos, startPos));
+    // ==========================================
+    // إدارة الرصاص والجسيمات
+    // ==========================================
+    void SpawnBullet(Vector3 startPos, Vector3 targetPos, bool isPlayerBullet, float baseDamage) {
+        // البحث عن رصاصة غير نشطة في المسبح
+        BulletObject* bullet = nullptr;
+        for (int i = 0; i < BULLET_POOL_SIZE; i++) {
+            if (!bulletPool[i].active) { bullet = &bulletPool[i]; break; }
+        }
+        if (!bullet) return; // المسبح ممتلئ
+
+        Vector3 direction = Vector3Normalize(Vector3Subtract(targetPos, startPos));
         
         float currentSpread = weaponStats.baseSpread;
-        if (Vector3LengthSqr(playerVelocity) > 1.0f) currentSpread *= 2.5f; 
-        
-        _v1.x += GetRandomFloat(-0.5f, 0.5f) * currentSpread;
-        _v1.y += GetRandomFloat(-0.5f, 0.5f) * currentSpread;
-        _v1.z += GetRandomFloat(-0.5f, 0.5f) * currentSpread;
-        _v1 = Vector3Normalize(_v1);
+        if (Vector3LengthSqr(playerVelocity) > 1.0f) currentSpread *= 2.5f;
 
-        Bullet* bullet = GetAvailableBullet();
-        if (bullet != nullptr) {
-            bullet->position = startPos;
-            
-            // حساب زاوية النظر (LookAt Matrix)
-            _v2 = Vector3Add(startPos, _v1);
-            bullet->transform = MatrixLookAt(startPos, _v2, (Vector3){0, 1, 0});
+        // تطبيق الانتشار (Spread)
+        direction.x += ((float)GetRandomValue(-100, 100) / 100.0f) * currentSpread;
+        direction.y += ((float)GetRandomValue(-100, 100) / 100.0f) * currentSpread;
+        direction.z += ((float)GetRandomValue(-100, 100) / 100.0f) * currentSpread;
+        direction = Vector3Normalize(direction);
 
-            bullet->velocity = Vector3Scale(_v1, weaponStats.bulletSpeed);
-            bullet->distanceTraveled = 0.0f;
-            bullet->active = true;
-            bullet->isPlayerBullet = isPlayerBullet;
-            bullet->damage = baseDamage; 
-            
-            activeBullets.push_back(bullet);
-        }
+        bullet->position = startPos;
+        bullet->velocity = Vector3Scale(direction, weaponStats.bulletSpeed);
+        bullet->distanceTraveled = 0;
+        bullet->maxDistance = 600.0f;
+        bullet->damage = baseDamage;
+        bullet->isPlayerBullet = isPlayerBullet;
+        bullet->active = true;
     }
 
-    void CreateImpactEffect(Vector3 pos, Vector3 dir, bool isBlood) {
+    void CreateImpactEffect(Vector3 pos, Vector3 normal, bool isBlood) {
         int particleCount = isBlood ? 8 : 4;
-        for (int i = 0; i < particleCount; i++) {
-            Smoke* smoke = GetAvailableSmoke();
-            if (smoke == nullptr) break;
+        for (int p = 0; p < particleCount; p++) {
+            SmokeParticle* smoke = nullptr;
+            for (int i = 0; i < SMOKE_POOL_SIZE; i++) {
+                if (!smokePool[i].active) { smoke = &smokePool[i]; break; }
+            }
+            if (!smoke) break;
 
             smoke->position = pos;
-            smoke->scale = GetRandomFloat(0.05f, 0.13f);
+            smoke->scale = 0.05f + ((float)GetRandomValue(0, 80) / 1000.0f);
             
-            _tempDir = Vector3Normalize((Vector3){
-                GetRandomFloat(-0.5f, 0.5f), 
-                GetRandomFloat(-0.5f, 0.5f), 
-                GetRandomFloat(-0.5f, 0.5f)
-            });
-            
+            Vector3 randomDir = {
+                ((float)GetRandomValue(-100, 100) / 100.0f),
+                ((float)GetRandomValue(-100, 100) / 100.0f),
+                ((float)GetRandomValue(-100, 100) / 100.0f)
+            };
+            randomDir = Vector3Normalize(randomDir);
+
             if (isBlood) {
-                smoke->velocity = Vector3Scale(_tempDir, GetRandomFloat(1.5f, 4.5f));
+                smoke->velocity = Vector3Scale(randomDir, 1.5f + ((float)GetRandomValue(0, 30) / 10.0f));
             } else {
-                _v1 = Vector3Scale(dir, 0.8f);
-                Vector3 mixedDir = Vector3Normalize(Vector3Add(Vector3Scale(_tempDir, 0.5f), _v1));
-                smoke->velocity = Vector3Scale(mixedDir, GetRandomFloat(2.0f, 5.0f));
+                Vector3 reflection = Vector3Normalize(Vector3Add(Vector3Scale(randomDir, 0.5f), Vector3Scale(normal, 0.8f)));
+                smoke->velocity = Vector3Scale(reflection, 2.0f + ((float)GetRandomValue(0, 30) / 10.0f));
             }
 
             smoke->life = 1.0f;
-            smoke->active = true;
             smoke->isBlood = isBlood;
-            activeSmokes.push_back(smoke);
+            smoke->active = true;
         }
     }
 
-    void Fire() {
-        if (isReloading) return;
-
-        if (currentAmmo <= 0) {
-            ReloadWeapon();
-            return;
-        }
-
-        double currentTime = GetTime();
-        if (currentTime - lastFireTime < weaponStats.fireRate) return; 
-        lastFireTime = currentTime;
-
-        currentAmmo--;
-        ApplyRecoil();
-
-        // 1. Raycast من الكاميرا
-        Ray aimRay = { camera.position, Vector3Normalize(Vector3Subtract(camera.target, camera.position)) };
+    // ==========================================
+    // نظام الـ CCD (Continuous Collision Detection)
+    // ==========================================
+    float DistancePointLineSegment(Vector3 p, Vector3 a, Vector3 b, Vector3& closestPoint) {
+        Vector3 ab = Vector3Subtract(b, a);
+        float lengthSqr = Vector3LengthSqr(ab);
+        if (lengthSqr == 0.0f) { closestPoint = a; return Vector3Distance(p, a); }
         
-        // (في بيئة الـ C++ الحقيقية نستخدم فحص التصادم مع الصناديق المحيطية BoundingBoxes للبيئة والأعداء)
-        // سنفترض هنا نقطة وهمية على بعد 500 متر ما لم يصطدم بشيء
-        Vector3 targetPoint = Vector3Add(aimRay.position, Vector3Scale(aimRay.direction, 500.0f)); 
-
-        // إحداثيات فوهة السلاح
-        Vector3 muzzlePos = playerPos; 
-        muzzlePos.y += 1.5f; // تقديري
-
-        SpawnBullet(muzzlePos, targetPoint, true, weaponStats.damage);
+        float t = Vector3DotProduct(Vector3Subtract(p, a), ab) / lengthSqr;
+        t = Clamp(t, 0.0f, 1.0f);
+        closestPoint = Vector3Add(a, Vector3Scale(ab, t));
+        return Vector3Distance(p, closestPoint);
     }
 
+    // ==========================================
+    // حلقة التحديث الشاملة
+    // ==========================================
     void Update(float delta) {
-        // إدارة عداد التلقيم (بديل الـ setTimeout)
+        // 1. تحديث حالة إعادة التلقيم (Reload)
         if (isReloading) {
-            reloadTimer -= delta;
-            if (reloadTimer <= 0.0f) {
+            if (GetTime() - reloadStartTime >= weaponStats.reloadTime) {
                 currentAmmo = weaponStats.magSize;
                 isReloading = false;
             }
         }
 
-        // 🔥 إجبار اللاعب على النظر لجهة التصويب أثناء الإطلاق 🔥
-        if (isFiring && !isDead) {
+        // 2. تحديث الإطلاق (اللاعب)
+        if (isFiring && !isDead && !CarEngine::isDriving) {
+            // تدوير اللاعب نحو الكاميرا بسلاسة
             float aimRotation = currentCameraYaw + PI;
-            float angleDiff = aimRotation - playerRotationY;
+            float angleDiff = aimRotation - 0.0f; // استبدل 0 بدوران اللاعب الفعلي إذا وجد في main
             angleDiff = atan2f(sinf(angleDiff), cosf(angleDiff));
-            playerRotationY += angleDiff * 25.0f * delta; 
+            // playerModel.transform = MatrixRotateY(...) هنا للتدوير
             
-            Fire();
+            if (currentAmmo > 0 && !isReloading) {
+                double currentTime = GetTime();
+                if (currentTime - lastFireTime >= weaponStats.fireRate) {
+                    lastFireTime = currentTime;
+                    currentAmmo--;
+                    ApplyRecoil();
+
+                    // حساب اتجاه الطلقة من الكاميرا
+                    Vector3 cameraDir = {
+                        -sinf(currentCameraYaw) * cosf(currentCameraPitch),
+                        sinf(currentCameraPitch),
+                        -cosf(currentCameraYaw) * cosf(currentCameraPitch)
+                    };
+
+                    // حساب مكان خروج الطلقة (Muzzle)
+                    Vector3 muzzlePos = playerPos;
+                    muzzlePos.y += 1.3f;
+                    Vector3 rightVec = { cosf(currentCameraYaw), 0.0f, -sinf(currentCameraYaw) };
+                    muzzlePos = Vector3Add(muzzlePos, Vector3Scale(rightVec, 0.3f));
+                    muzzlePos = Vector3Add(muzzlePos, Vector3Scale(cameraDir, 0.8f));
+
+                    Vector3 targetPos = Vector3Add(camera.position, Vector3Scale(cameraDir, 500.0f));
+                    SpawnBullet(muzzlePos, targetPos, true, weaponStats.damage);
+                }
+            } else if (currentAmmo <= 0 && !isReloading) {
+                isReloading = true;
+                reloadStartTime = GetTime();
+            }
         }
 
-        // 🔥 نظام CCD: دقة إصابة 100% 🔥
-        for (int i = activeBullets.size() - 1; i >= 0; i--) {
-            Bullet* b = activeBullets[i];
-            _moveDist = Vector3Scale(b->velocity, delta);
-            float moveLen = Vector3Length(_moveDist);
-            
-            _v1 = Vector3Add(b->position, _moveDist); // nextPos
-            
-            // 1. فحص التصادم مع الجدران (Raycast)
-            Ray ray = { b->position, Vector3Normalize(b->velocity) };
-            bool hitEnvironment = false; // استبدلها بدالة فحص البيئة في C++
-            Vector3 envHitPoint = {0};
-            Vector3 envHitNormal = {0, 1, 0};
+        // 3. تحديث الرصاص (CCD Update)
+        for (int i = 0; i < BULLET_POOL_SIZE; i++) {
+            if (!bulletPool[i].active) continue;
+            BulletObject& b = bulletPool[i];
 
-            if (hitEnvironment) {
-                CreateImpactEffect(envHitPoint, envHitNormal, false);
-                b->active = false;
-                activeBullets.erase(activeBullets.begin() + i);
+            Vector3 moveDist = Vector3Scale(b.velocity, delta);
+            float moveLen = Vector3Length(moveDist);
+            Vector3 nextPos = Vector3Add(b.position, moveDist);
+
+            bool hitRegistered = false;
+            Vector3 closestPt;
+
+            // فحص التصادم مع الأرض كمثال مبدئي (البيئة)
+            if (nextPos.y <= 0.1f) {
+                CreateImpactEffect(nextPos, (Vector3){0, 1, 0}, false);
+                b.active = false;
                 continue;
             }
 
-            b->position = _v1;
-            b->distanceTraveled += moveLen;
-
-            bool hitRegistered = false;
-            
-            // 2. فحص التصادم المتقدم (Line3 CCD)
-            if (b->isPlayerBullet /* && يوجد أعداء */) {
-                // محاكاة الحلقة على الأعداء
-                /*
-                for (auto& npc : npcs) {
-                    if (npc.state == "DEAD") continue;
-                    
-                    float npcBaseY = npc.position.y;
-                    _v3 = npc.position;
-                    _v3.y += 1.0f; // npcCenter
-                    
-                    _closestPt = ClosestPointOnLineSegment(_v3, b->position, _v1);
-                    
-                    if (Vector3Distance(_closestPt, _v3) < 0.6f) { 
-                        float hitHeight = _closestPt.y - npcBaseY;
-                        bool isHeadshot = (hitHeight > 1.4f);
-                        
-                        int finalDamage = isHeadshot ? (b->damage * weaponStats.headshotMultiplier) : b->damage;
-                        DamageNPC(npc, finalDamage); 
-                        
-                        _v2 = Vector3Negate(b->velocity);
-                        CreateImpactEffect(_closestPt, _v2, true); 
-                        
-                        hitRegistered = true;
-                        break;
-                    }
-                }
-                */
-            } else if (!b->isPlayerBullet && !isDead) {
-                _v3 = playerPos;
-                _v3.y += 1.0f; // playerCenter
-                
-                _closestPt = ClosestPointOnLineSegment(_v3, b->position, _v1);
-                
-                if (Vector3Distance(_closestPt, _v3) < 0.6f) {
-                    playerHealth -= b->damage;
-                    _v2 = Vector3Negate(b->velocity);
-                    CreateImpactEffect(_closestPt, _v2, true);
+            // فحص التصادم مع الأعداء أو اللاعب
+            if (b.isPlayerBullet) {
+                /* 
+                 * ربط ذكي بنظام الـ NPC:
+                 * نقوم بالمرور على الأعداء، ونقيس المسافة بين شعاع الرصاصة (من b.position إلى nextPos) ومركز العدو.
+                 */
+                // for (auto npc : NPCSystem::npcs) { ... }
+            } else if (!b.isPlayerBullet && !isDead) {
+                Vector3 pCenter = playerPos; pCenter.y += 1.0f;
+                if (DistancePointLineSegment(pCenter, b.position, nextPos, closestPt) < 0.6f) {
+                    playerHealth -= b.damage;
+                    CreateImpactEffect(closestPt, Vector3Normalize(Vector3Negate(b.velocity)), true);
                     
                     if (playerHealth <= 0) {
                         isDead = true;
-                        // Trigger death animation
+                        playerHealth = 0;
                     }
-                    hitRegistered = true;
+                    b.active = false;
+                    continue;
                 }
             }
 
-            if (hitRegistered || b->distanceTraveled > b->maxDistance) {
-                b->active = false;
-                activeBullets.erase(activeBullets.begin() + i);
-            }
+            b.position = nextPos;
+            b.distanceTraveled += moveLen;
+            if (b.distanceTraveled > b.maxDistance) b.active = false;
         }
 
-        // تحديث شرار الجدران والدم
-        for (int i = activeSmokes.size() - 1; i >= 0; i--) {
-            Smoke* p = activeSmokes[i];
-            _moveDist = Vector3Scale(p->velocity, delta);
-            p->position = Vector3Add(p->position, _moveDist);
-            
-            p->velocity.y -= 15.0f * delta; 
-            p->scale += delta * 0.5f; 
-            p->life -= delta * (p->isBlood ? 2.5f : 4.0f); 
+        // 4. تحديث الدخان والدم (Particles)
+        for (int i = 0; i < SMOKE_POOL_SIZE; i++) {
+            if (!smokePool[i].active) continue;
+            SmokeParticle& p = smokePool[i];
 
-            if (p->life <= 0.0f) {
-                p->active = false;
-                activeSmokes.erase(activeSmokes.begin() + i);
-            }
+            p.position = Vector3Add(p.position, Vector3Scale(p.velocity, delta));
+            p.velocity.y -= 15.0f * delta; // جاذبية
+            p.scale += delta * 0.5f;
+            p.life -= delta * (p.isBlood ? 2.5f : 4.0f);
+
+            if (p.life <= 0 || p.position.y <= 0.0f) p.active = false;
         }
     }
 
     // ==========================================
-    // دوال الرسم المباشرة (بديل HTML/DOM و ريندر Three.js)
+    // الرسم ثلاثي الأبعاد
     // ==========================================
     void Draw3D() {
-        // رسم الرصاصات (Tracer)
-        for (auto b : activeBullets) {
-            // رسم اسطوانة موجهة مع خط الرصاصة
-            DrawCylinderEx(b->position, Vector3Add(b->position, Vector3Scale(Vector3Normalize(b->velocity), 1.2f)), 0.01f, 0.01f, 4, (Color){ 255, 170, 0, 200 });
+        // رسم السلاح بيد اللاعب (يتم تعديل موقعه بناءً على الكاميرا إذا كنا Scoped)
+        if (!isDead && !CarEngine::isDriving) {
+            Vector3 wPos = playerPos;
+            wPos.y += 1.2f;
+            Vector3 right = { cosf(currentCameraYaw), 0.0f, -sinf(currentCameraYaw) };
+            Vector3 forward = { -sinf(currentCameraYaw), 0.0f, -cosf(currentCameraYaw) };
+            
+            wPos = Vector3Add(wPos, Vector3Scale(right, 0.3f));
+            wPos = Vector3Add(wPos, Vector3Scale(forward, 0.4f));
+
+            if (!isScoped) {
+                DrawModelEx(weaponModel, wPos, {0,1,0}, currentCameraYaw * (180.0f/PI), {10.0f, 10.0f, 10.0f}, WHITE);
+            }
         }
 
-        // رسم הדخان/الدم
-        for (auto p : activeSmokes) {
-            Color c = p->isBlood ? (Color){ 170, 0, 0, (unsigned char)(255 * p->life) } : (Color){ 255, 170, 0, (unsigned char)(255 * p->life) };
-            DrawSphere(p->position, p->scale, c);
+        // رسم الرصاص (كخطوط سريعة متوهجة)
+        for (int i = 0; i < BULLET_POOL_SIZE; i++) {
+            if (!bulletPool[i].active) continue;
+            Vector3 tail = Vector3Subtract(bulletPool[i].position, Vector3Scale(Vector3Normalize(bulletPool[i].velocity), 1.2f));
+            DrawCylinderEx(tail, bulletPool[i].position, 0.02f, 0.02f, 4, ORANGE);
+        }
+
+        // رسم الجسيمات (دم أو شرار)
+        for (int i = 0; i < SMOKE_POOL_SIZE; i++) {
+            if (!smokePool[i].active) continue;
+            Color pCol = smokePool[i].isBlood ? MAROON : GRAY;
+            pCol.a = (unsigned char)(smokePool[i].life * 255.0f);
+            DrawCube(smokePool[i].position, smokePool[i].scale, smokePool[i].scale, smokePool[i].scale, pCol);
         }
     }
 
-    void DrawUI(int screenWidth, int screenHeight) {
-        // نص الذخيرة
-        std::string ammoStr = isReloading ? "RELOADING..." : (std::to_string(currentAmmo) + " / INF");
-        Color textColor = isReloading ? ORANGE : (currentAmmo == 0 ? RED : WHITE);
+    // ==========================================
+    // رسم واجهة القتال (HUD)
+    // ==========================================
+    void DrawUI(int sw, int sh) {
+        if (CarEngine::isDriving) return;
+
+        // رسم شريط الصحة
+        DrawRectangle(sw/2 - 125, sh - (sh * 0.08f), 250, 10, Fade(BLACK, 0.6f));
+        DrawRectangle(sw/2 - 125, sh - (sh * 0.08f), (int)(250 * (playerHealth / 100.0f)), 10, playerHealth > 20 ? GREEN : RED);
+
+        // رسم السلاح والذخيرة
+        DrawTextureEx(weaponIcon, { (float)sw/2 + 150, (float)sh - 100 }, 0.0f, 0.8f, Fade(WHITE, 0.8f));
         
-        int textWidth = MeasureText(ammoStr.c_str(), 22);
-        DrawText(ammoStr.c_str(), (screenWidth / 2) - (textWidth / 2), screenHeight - (screenHeight * 0.08) + 40, 22, textColor);
-        
-        // رسم أيقونة السلاح
-        if (weaponIcon.id != 0) {
-            DrawTextureEx(weaponIcon, (Vector2){ (float)(screenWidth / 2) - 60, (float)(screenHeight - (screenHeight * 0.08) - 20) }, 0.0f, 1.0f, (Color){ 255, 255, 255, 200 });
-        }
+        std::string ammoStr = isReloading ? "RELOADING..." : TextFormat("%d / %s", currentAmmo, "\u221E");
+        Color ammoCol = isReloading ? ORANGE : (currentAmmo <= 5 ? RED : WHITE);
+        DrawText(ammoStr.c_str(), sw/2 + 160, sh - 40, 24, ammoCol);
     }
+
 }
