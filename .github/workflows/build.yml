@@ -11,8 +11,13 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    env:
+      ANDROID_NDK_VERSION: 25.1.8937393
+      CMAKE_VERSION: 3.22.1
+      GRADLE_VERSION: 8.3
+
     steps:
-      - name: Checkout Source
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
       - name: Setup Java 17
@@ -24,35 +29,44 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install CMake
-        run: sdkmanager "cmake;3.22.1"
+      - name: Install SDK Components
+        run: |
+          yes | sdkmanager --licenses
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-34" \
+            "build-tools;34.0.0" \
+            "cmake;${CMAKE_VERSION}" \
+            "ndk;${ANDROID_NDK_VERSION}"
 
-      - name: Install NDK
-        run: sdkmanager "ndk;25.1.8937393"
+      - name: Download Gradle Wrapper
+        run: |
+          wget https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip
+          unzip gradle-${GRADLE_VERSION}-bin.zip
+          cp -r gradle-${GRADLE_VERSION} gradle-home
 
       - name: Clone Raylib
         run: |
           git clone --depth=1 https://github.com/raysan5/raylib.git
 
-      - name: Create Android Project
+      - name: Create Android Project Structure
         run: |
-
+          mkdir -p app
+          mkdir -p app/src/main
+          mkdir -p app/src/main/java
           mkdir -p app/src/main/cpp
           mkdir -p app/src/main/assets
+          mkdir -p app/src/main/res
           mkdir -p app/src/main/res/values
+          mkdir -p app/src/main/res/xml
+          mkdir -p app/src/main/res/drawable
           mkdir -p app/src/main/res/mipmap-anydpi-v26
+          mkdir -p gradle
+          mkdir -p gradle/wrapper
 
-          cp *.cpp app/src/main/cpp/ 2>/dev/null || true
-          cp *.h app/src/main/cpp/ 2>/dev/null || true
-          cp CMakeLists.txt app/src/main/cpp/
-
-          cp -r raylib/src app/src/main/cpp/raylib_src
-
-          if [ -d assets ]; then
-            cp -r assets/* app/src/main/assets/
-          fi
-
-          cat > settings.gradle <<EOF
+      - name: Create settings.gradle
+        run: |
+          cat > settings.gradle <<'EOF'
           pluginManagement {
               repositories {
                   google()
@@ -60,127 +74,263 @@ jobs:
                   gradlePluginPortal()
               }
           }
-
           dependencyResolutionManagement {
-              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
               repositories {
                   google()
                   mavenCentral()
               }
           }
-
-          rootProject.name="PUBGNative"
+          rootProject.name = "PUBGNative"
           include(":app")
           EOF
 
-          cat > build.gradle <<EOF
+      - name: Create Root build.gradle
+        run: |
+          cat > build.gradle <<'EOF'
           plugins {
               id 'com.android.application' version '8.1.1' apply false
           }
           EOF
 
-          cat > gradle.properties <<EOF
-          org.gradle.jvmargs=-Xmx4096m
+      - name: Create gradle.properties
+        run: |
+          cat > gradle.properties <<'EOF'
+          org.gradle.jvmargs=-Xmx4096m -Dfile.encoding=UTF-8
           android.useAndroidX=true
           android.enableJetifier=true
+          android.nonTransitiveRClass=true
+          android.defaults.buildfeatures.buildconfig=true
+          org.gradle.parallel=true
+          org.gradle.daemon=true
+          org.gradle.configureondemand=true
+          org.gradle.caching=true
           EOF
 
-          cat > app/build.gradle <<EOF
+      - name: Create local.properties
+        run: |
+          echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
+          echo "ndk.dir=$ANDROID_SDK_ROOT/ndk/${ANDROID_NDK_VERSION}" >> local.properties
+
+      - name: Create gradle-wrapper.properties
+        run: |
+          cat > gradle/wrapper/gradle-wrapper.properties <<'EOF'
+          distributionBase=GRADLE_USER_HOME
+          distributionPath=wrapper/dists
+          distributionUrl=https\://services.gradle.org/distributions/gradle-8.3-bin.zip
+          zipStoreBase=GRADLE_USER_HOME
+          zipStorePath=wrapper/dists
+          EOF
+
+      - name: Download Gradle Wrapper JAR
+        run: |
+          wget https://raw.githubusercontent.com/gradle/gradle/v8.3.0/gradle/wrapper/gradle-wrapper.jar \
+          -O gradle/wrapper/gradle-wrapper.jar
+
+      - name: Create gradlew
+        run: |
+          wget https://raw.githubusercontent.com/gradle/gradle/v8.3.0/gradlew
+          chmod +x gradlew
+
+      - name: Create gradlew.bat
+        run: |
+          wget https://raw.githubusercontent.com/gradle/gradle/v8.3.0/gradlew.bat
+
+      - name: Create app/build.gradle
+        run: |
+          cat > app/build.gradle <<'EOF'
           plugins {
               id 'com.android.application'
           }
-
           android {
-
               namespace "com.pubg.nativegame"
-
               compileSdk 34
-
+              ndkVersion "25.1.8937393"
               defaultConfig {
-
                   applicationId "com.pubg.nativegame"
-
                   minSdk 24
                   targetSdk 34
-
                   versionCode 1
                   versionName "1.0"
-
                   externalNativeBuild {
                       cmake {
-                          cppFlags "-std=c++17 -O3"
+                          cppFlags "-std=c++17 -O3 -ffast-math"
                       }
                   }
               }
-
               buildTypes {
+                  debug {
+                      debuggable true
+                  }
                   release {
                       minifyEnabled false
+                      shrinkResources false
+                      debuggable false
                   }
               }
-
+              sourceSets {
+                  main {
+                      assets.srcDirs = ['src/main/assets']
+                  }
+              }
               externalNativeBuild {
                   cmake {
                       path "src/main/cpp/CMakeLists.txt"
                       version "3.22.1"
                   }
               }
-
-              ndkVersion "25.1.8937393"
+          }
+          dependencies {
           }
           EOF
 
-          cat > app/src/main/AndroidManifest.xml <<EOF
+      - name: Create AndroidManifest
+        run: |
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-
-          <uses-feature
-              android:glEsVersion="0x00020000"
-              android:required="true"/>
-
-          <application
-              android:label="PUBG Native">
-
-              <activity
-                  android:name="android.app.NativeActivity"
-                  android:exported="true"
-                  android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
-
-                  <meta-data
-                      android:name="android.app.lib_name"
-                      android:value="pubg_native"/>
-
-                  <intent-filter>
-                      <action android:name="android.intent.action.MAIN"/>
-                      <category android:name="android.intent.category.LAUNCHER"/>
-                  </intent-filter>
-
-              </activity>
-
-          </application>
-
+              <uses-feature android:glEsVersion="0x00030000" android:required="true"/>
+              <uses-permission android:name="android.permission.INTERNET"/>
+              <application
+                  android:label="PUBG Native"
+                  android:allowBackup="false"
+                  android:hardwareAccelerated="true"
+                  android:extractNativeLibs="true">
+                  <activity
+                      android:name="android.app.NativeActivity"
+                      android:exported="true"
+                      android:screenOrientation="landscape"
+                      android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
+                      android:configChanges="orientation|keyboardHidden|keyboard|screenLayout|screenSize|smallestScreenSize|uiMode">
+                      <meta-data android:name="android.app.lib_name" android:value="pubg_native"/>
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                      </intent-filter>
+                  </activity>
+              </application>
           </manifest>
           EOF
 
+      - name: Create Resources
+        run: |
           cat > app/src/main/res/values/strings.xml <<EOF
           <resources>
-              <string name="app_name">PUBG Native</string>
+          <string name="app_name">PUBG Native</string>
           </resources>
           EOF
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
+          cat > app/src/main/res/xml/backup_rules.xml <<EOF
+          <?xml version="1.0" encoding="utf-8"?>
+          <full-backup-content/>
+          EOF
 
-      - name: Generate Wrapper
+          touch app/src/main/res/drawable/ic_launcher_background.xml
+
+      - name: Copy Game Sources
         run: |
-          gradle wrapper --gradle-version 8.3
+          cp *.cpp app/src/main/cpp/ 2>/dev/null || true
+          cp *.c app/src/main/cpp/ 2>/dev/null || true
+          cp *.h app/src/main/cpp/ 2>/dev/null || true
+          cp *.hpp app/src/main/cpp/ 2>/dev/null || true
 
-      - name: Build APK
+          if [ -f CMakeLists.txt ]; then
+              cp CMakeLists.txt app/src/main/cpp/
+          fi
+
+          if [ -d assets ]; then
+              cp -r assets/* app/src/main/assets/
+          fi
+
+      - name: Copy Raylib Sources
+        run: |
+          cp -r raylib/src app/src/main/cpp/raylib_src
+          mkdir -p app/src/main/cpp/raylib_src/external
+          cp -r raylib/src/external/* app/src/main/cpp/raylib_src/external/
+
+      - name: Ensure CMakeLists.txt Exists
+        run: |
+          if [ ! -f app/src/main/cpp/CMakeLists.txt ]; then
+              cat > app/src/main/cpp/CMakeLists.txt <<'EOF'
+              cmake_minimum_required(VERSION 3.22.1)
+              project(pubg_native)
+
+              set(CMAKE_CXX_STANDARD 17)
+              add_definitions(-DPLATFORM_ANDROID -DGRAPHICS_API_OPENGL_ES2)
+
+              include_directories(
+                  .
+                  raylib_src
+                  raylib_src/external/glfw/include
+              )
+
+              add_library(pubg_native SHARED
+                  main.cpp
+                  combat.cpp
+                  npc.cpp
+                  driving.cpp
+                  animations.cpp
+                  collision.cpp
+                  raylib_src/rcore.c
+                  raylib_src/rshapes.c
+                  raylib_src/rtextures.c
+                  raylib_src/rtext.c
+                  raylib_src/rmodels.c
+                  raylib_src/raudio.c
+              )
+
+              find_library(log-lib log)
+              find_library(glesv-lib GLESv2)
+              find_library(egl-lib EGL)
+              find_library(android-lib android)
+              find_library(m-lib m)
+
+              target_link_libraries(pubg_native
+                  ${log-lib}
+                  ${glesv-lib}
+                  ${egl-lib}
+                  ${android-lib}
+                  ${m-lib}
+              )
+          EOF
+          fi
+
+      - name: Verify Project Files
+        run: |
+          echo "===== CPP ====="
+          find app/src/main/cpp
+          echo "===== Assets ====="
+          find app/src/main/assets || true
+          echo "===== Resources ====="
+          find app/src/main/res
+          echo "===== Manifest ====="
+          cat app/src/main/AndroidManifest.xml
+
+      - name: Prepare Build
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug --stacktrace
+          export ANDROID_HOME=$ANDROID_SDK_ROOT
+          export ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/${ANDROID_NDK_VERSION}
+          export ANDROID_NDK_ROOT=$ANDROID_NDK_HOME
+          export PATH=$ANDROID_HOME/platform-tools:$PATH
 
-      - name: Upload APK
+      - name: Build Debug APK
+        run: |
+          export ANDROID_HOME=$ANDROID_SDK_ROOT
+          export ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/${ANDROID_NDK_VERSION}
+          export ANDROID_NDK_ROOT=$ANDROID_NDK_HOME
+          ./gradlew clean assembleDebug --stacktrace --info --no-daemon
+
+      - name: Build Release APK
+        run: |
+          export ANDROID_HOME=$ANDROID_SDK_ROOT
+          export ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/${ANDROID_NDK_VERSION}
+          export ANDROID_NDK_ROOT=$ANDROID_NDK_HOME
+          ./gradlew assembleRelease --stacktrace --info --no-daemon
+
+      - name: Upload Release APK
         uses: actions/upload-artifact@v4
         with:
-          name: PUBG-Native-APK
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: PUBG-Native-Release
+          path: |
+            app/build/outputs/apk/release/*.apk
+            app/build/outputs/apk/debug/*.apk
