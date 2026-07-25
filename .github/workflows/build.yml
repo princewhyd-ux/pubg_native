@@ -1,4 +1,4 @@
-name: Build Real Android APK
+name: Build Android APK
 
 on:
   push:
@@ -9,7 +9,7 @@ jobs:
   build-apk:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout User Code
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
       - name: Set up JDK 17
@@ -21,34 +21,104 @@ jobs:
       - name: Set up Android SDK & NDK
         uses: android-actions/setup-android@v3
 
-      - name: Prepare Raylib and Android Project Template
+      - name: Create Complete Android Project Structure
         run: |
-          # استنساخ محرك Raylib للحصول على قالب الأندرويد الجاهز
-          git clone --depth 1 https://github.com/raysan5/raylib.git
+          # إنشاء هيكل تطبيق أندرويد قياسي ونظيف بالكامل من الصفر
+          mkdir -p android_app/app/src/main/cpp
+          mkdir -p android_app/app/src/main/assets
+          mkdir -p android_app/app/src/main/java/com/pubg/native
+
+          # نسخ كافة ملفات الكود والرأس الخاصة بك
+          cp *.cpp android_app/app/src/main/cpp/ 2>/dev/null || true
+          cp *.h android_app/app/src/main/cpp/ 2>/dev/null || true
           
-          # نقل ملفات الكود الخاصة بك وملفات الرأس إلى مسار الـ JNI في القالب
-          TARGET_DIR="raylib/examples/templates/android/app/src/main"
-          
-          mkdir -p $TARGET_DIR/cpp
-          mkdir -p $TARGET_DIR/assets
-          
-          cp *.cpp $TARGET_DIR/cpp/ 2>/dev/null || true
-          cp *.h $TARGET_DIR/cpp/ 2>/dev/null || true
-          cp CMakeLists.txt $TARGET_DIR/cpp/ 2>/dev/null || true
-          
-          # نقل مجلد الموارد الخاص بك (الـ assets والـ glb)
+          # نسخ مجلد الموارد assets والملفات الثلاثية الأبعاد glb
           if [ -d "assets" ]; then
-            cp -r assets/* $TARGET_DIR/assets/
+            cp -r assets/* android_app/app/src/main/assets/
           fi
 
-      - name: Build APK with Gradle
-        run: |
-          cd raylib/examples/templates/android
+          # كتابة ملف الإعدادات الرئيسي لـ CMake لتجميع كود الـ C++
+          cat << 'EOF' > android_app/app/src/main/cpp/CMakeLists.txt
+          cmake_minimum_required(VERSION 3.22.1)
+          project(pubg_native)
+          add_library(pubg_native SHARED main.cpp combat.cpp npc.cpp driving.cpp animations.cpp collision.cpp)
+          find_library(log-lib log)
+          find_library(glesv-lib GLESv2)
+          find_library(android-lib android)
+          target_link_libraries(pubg_native ${log-lib} ${glesv-lib} ${android-lib})
+          EOF
+
+          # كتابة ملف AndroidManifest الأساسي
+          cat << 'EOF' > android_app/app/src/main/AndroidManifest.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.INTERNET" />
+              <application android:allowBackup="true" android:label="PUBG Native" android:icon="@mipmap/ic_launcher">
+                  <activity android:name=".MainActivity" android:exported="true" android:theme="@style/Theme.AppCompat.NoActionBar">
+                      <intent-filter>
+                        <action android:name="android.intent.action.MAIN" />
+                        <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+          # كتابة ملف Gradle للبناء
+          cat << 'EOF' > android_app/build.gradle
+          plugins {
+              id 'com.android.application' version '8.1.1' apply false
+          }
+          EOF
+
+          cat << 'EOF' > android_app/app/build.gradle
+          plugins {
+              id 'com.android.application'
+          }
+          android {
+              namespace 'com.pubg.native'
+              compileSdk 34
+              defaultConfig {
+                  applicationId "com.pubg.native"
+                  minSdk 21
+                  targetSdk 34
+                  versionCode 1
+                  versionName "1.0"
+                  externalNativeBuild {
+                      cmake {
+                          cppFlags ""
+                      }
+                  }
+              }
+              buildTypes {
+                release {
+                    minifyEnabled false
+                }
+              }
+              externalNativeBuild {
+                  cmake {
+                      path file('src/main/cpp/CMakeLists.txt')
+                      version '3.22.1'
+                  }
+              }
+          }
+          dependencies {
+              implementation 'androidx.appcompat:appcompat:1.6.1'
+          }
+          EOF
+
+          # إنشاء ملف إعدادات التوزيع Gradle Wrapper
+          cd android_app
+          gradle wrapper --gradle-version 8.3
           chmod +x gradlew
-          ./gradlew assembleDebug
+
+      - name: Build APK via Gradle Wrapper
+        run: |
+          cd android_app
+          ./gradlew assembleDebug --no-daemon
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: pubg-native-apk
-          path: raylib/examples/templates/android/app/build/outputs/apk/debug/app-debug.apk
+          path: android_app/app/build/outputs/apk/debug/app-debug.apk
