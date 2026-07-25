@@ -29,7 +29,7 @@ jobs:
       - name: Compile Game (C++ to Native Binary)
         run: |
           mkdir -p build
-          emcc main.cpp combat.cpp npc.cpp driving.cpp animations.cpp collision.cpp -o build/index.html -Os -Wall -Iraylib/src -Lraylib/src -lraylib -s USE_GLFW=3 -s ASYNCIFY -s INITIAL_MEMORY=134217728 -s FORCE_FILESYSTEM=1 --shell-file raylib/src/minshell.html --preload-file assets
+          emcc main.cpp combat.cpp npc.cpp driving.cpp animations.cpp collision.cpp raylib/src/libraylib.a -o build/index.html -Os -Wall -Iraylib/src -s USE_GLFW=3 -s ASYNCIFY -s INITIAL_MEMORY=134217728 -s FORCE_FILESYSTEM=1 --shell-file raylib/src/minshell.html --preload-file assets
 
       - name: Upload Artifact
         uses: actions/upload-pages-artifact@v3
