@@ -23,7 +23,6 @@ extern bool isDead;
 extern float currentCameraYaw;
 extern float targetCameraYaw;
 extern float targetCameraPitch;
-extern float currentCameraPitch;
 extern bool isDraggingCamera;
 
 // هياكل وهمية لربطها بفيزياء البيئة
@@ -37,18 +36,6 @@ namespace GameCollision {
     extern bool CapsuleIntersect(Vector3 start, Vector3 end, float radius, Vector3& outNormal, float& outDepth);
     extern bool Raycast(Vector3 origin, Vector3 dir, Vector3& outHitPoint);
 }
-
-// هيكل السيارة
-struct CarObject {
-    Vector3 position;
-    Quaternion quaternion;
-    Vector3 rotation; // Euler YXZ
-    Vector3 exactSize;
-    Vector3 centerOffset;
-    float fuel = 100.0f;
-    bool engineOn = false;
-    bool isNpcDriven = false;
-};
 
 // هيكل الجزيئات
 struct DustParticle {
