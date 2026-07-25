@@ -20,7 +20,7 @@
 // المتغيرات العامة (Global State) 
 // ==========================================
 Camera3D camera = { 0 };
-Vector3 playerPos = { 0.0f, 0.0f, 0.0f }; // ✅ تم التعديل ليظهر اللاعب بجوار المنازل
+Vector3 playerPos = { 0.0f, 0.0f, 0.0f };
 bool isDead = false;
 float currentCameraYaw = 0.0f;
 float targetCameraYaw = 0.0f;
@@ -28,6 +28,8 @@ float currentCameraPitch = 0.3f;
 float targetCameraPitch = 0.3f;
 bool isDraggingCamera = false;
 Vector3 playerVelocity = { 0.0f, 0.0f, 0.0f };
+int totalAlivePlayers = 7; // إجمالي اللاعبين (أنت + 6 أعداء)
+int myKillCount = 0;       // عدد قتلاتك
 
 // هياكل البيئة
 struct EnvironmentObject {
@@ -38,7 +40,7 @@ std::vector<EnvironmentObject> environmentObjects;
 std::vector<CarObject*> gameCars;
 
 // ==========================================
-// متغيرات النظام الداخلية (Main.cpp Scope)
+// متغيرات النظام الداخلية
 // ==========================================
 const float cameraDist = 1.8f;
 bool isAirborne = false;
@@ -62,7 +64,6 @@ struct JoystickData {
     float distance = 0.0f;
 } joystickData;
 
-// إعدادات اللعبة
 std::map<std::string, float> GameSettings = {
     {"cameraSens", 0.005f},
     {"cameraSensScoped", 0.002f},
@@ -83,7 +84,7 @@ std::map<std::string, HUDElement> hudElements;
 std::string selectedEditBtn = "";
 
 // ==========================================
-// دوال مساعدة لإنشاء الواجهة والـ HUD
+// دوال الواجهة والـ HUD (أزرار كبيرة واحترافية)
 // ==========================================
 void InitHUD(int sw, int sh) {
     auto AddBtn = [&](std::string id, std::string path, float xPct, float yPct, float size) {
@@ -94,21 +95,41 @@ void InitHUD(int sw, int sh) {
         hudElements[id] = btn;
     };
 
-    // ✅ إزالة "assets/" لكي تعمل على الأندرويد مباشرة
-    AddBtn("btn-fire", "hud/fire.png", 80, 70, 80);
-    AddBtn("btn-scope", "hud/scope_btn.png", 85, 50, 60);
-    AddBtn("btn-jump", "hud/jump.png", 90, 85, 60);
-    AddBtn("btn-crouch", "hud/crouch.png", 80, 85, 60);
-    AddBtn("btn-prone", "hud/prone.png", 70, 85, 60);
-    AddBtn("btn-enter", "hud/enter_car.png", 70, 50, 60); 
+    // 🔥 تكبير أحجام الأزرار وتعديل أماكنها لتكون مريحة، وإظهار السكوب بوضوح 🔥
+    AddBtn("btn-fire", "hud/fire.png", 82, 70, 100);       // الزر الأكبر
+    AddBtn("btn-scope", "hud/scope_btn.png", 82, 45, 80);  // مرفوع للأعلى ليظهر جيداً
+    AddBtn("btn-jump", "hud/jump.png", 92, 80, 80);
+    AddBtn("btn-crouch", "hud/crouch.png", 82, 88, 80);
+    AddBtn("btn-prone", "hud/prone.png", 72, 88, 80);
+    AddBtn("btn-enter", "hud/enter_car.png", 72, 50, 80); 
 }
 
 void DrawHUD(int sw, int sh) {
-    // رسم شريط الصحة للاعب
-    extern int playerHealth; // من نظام combat.cpp
+    extern int playerHealth; 
+    
+    // 1. شريط الصحة للاعب في الأسفل
     DrawRectangle(sw/2 - 125, sh - (sh * 0.05f), 250, 8, Fade(BLACK, 0.6f));
     DrawRectangle(sw/2 - 125, sh - (sh * 0.05f), (int)(250 * (CombatSystem::playerHealth / 100.0f)), 8, GREEN);
 
+    // ==========================================
+    // 2. تصميم واجهة القتلات والأحياء (Kill Feed UI)
+    // ==========================================
+    // خلفية سوداء شفافة وفاخرة في أعلى الشاشة (جهة اليسار قليلاً أو اليمين)
+    DrawRectangle(sw - 220, 20, 200, 65, Fade(BLACK, 0.5f));
+    DrawRectangleLines(sw - 220, 20, 200, 65, Fade(WHITE, 0.2f));
+
+    // عدد الأشخاص على قيد الحياة (Alive)
+    DrawText("ALIVE", sw - 200, 30, 14, YELLOW);
+    DrawText(TextFormat("%02d", totalAlivePlayers), sw - 140, 27, 22, WHITE);
+
+    // خط فاصل صغير
+    DrawLine(sw - 110, 28, sw - 110, 75, Fade(WHITE, 0.2f));
+
+    // قتلات اللاعب (Kills)
+    DrawText("KILLS", sw - 90, 30, 14, RED);
+    DrawText(TextFormat("%02d", myKillCount), sw - 40, 27, 22, WHITE);
+
+    // رسم الأزرار
     for (auto& pair : hudElements) {
         HUDElement& btn = pair.second;
         if (btn.id == "btn-enter" && CarEngine::carModel == nullptr && !isEditMode) continue;
@@ -126,11 +147,11 @@ void DrawHUD(int sw, int sh) {
     }
 }
 
+
 // ==========================================
 // الدالة الرئيسية (حلقة اللعبة)
 // ==========================================
 int main() {
-    // ✅ 1. جعل الشاشة بكامل العرض (Full Screen) تلقائياً
     SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_WINDOW_HIGHDPI | FLAG_FULLSCREEN_MODE);
     InitWindow(0, 0, "PUBG Mobile Native - C++ Engine");
     SetTargetFPS(120);
@@ -146,23 +167,31 @@ int main() {
 
     bool isLoading = true;
     float loadProgress = 0.0f;
-    Texture2D logoTex = LoadTexture("logo.png"); // مسار الأندرويد الصحيح
+    Texture2D logoTex = LoadTexture("logo.png");
     
-    // ✅ 2. إعداد الأرضية بشكل صحيح بالصورة (Texture)
+    // ==========================================
+    // 🔥 إصلاح الأرضية السوداء (UV Scaling) 🔥
+    // ==========================================
     Texture2D groundTex = LoadTexture("ground.png");
     SetTextureWrap(groundTex, TEXTURE_WRAP_REPEAT); 
     Mesh planeMesh = GenMeshPlane(1000.0f, 1000.0f, 50, 50); 
+    
+    // هذا الكود يكرر صورتك 100 مرة على الأرضية لتظهر بتفاصيلها الواقعية ولا تبدو سوداء
+    for (int i = 0; i < planeMesh.vertexCount; i++) {
+        planeMesh.texcoords[i*2] *= 100.0f;     // تكرار المحور X
+        planeMesh.texcoords[i*2 + 1] *= 100.0f; // تكرار المحور Y
+    }
+    UpdateMeshBuffer(planeMesh, 1, planeMesh.texcoords, planeMesh.vertexCount * 2 * sizeof(float), 0);
+    
     Model groundModel = LoadModelFromMesh(planeMesh);
     groundModel.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = groundTex;
 
-    // 3. تحميل بيئة اللعب (المجسمات)
+    // 3. تحميل المجسمات (بدون تصغير مزدوج)
     Model playerModel = LoadModel("player.glb");
-    playerModel.transform = MatrixScale(0.01f, 0.01f, 0.01f);
-
     Model houseModel = LoadModel("house.glb");
     Model carModel = LoadModel("car2.glb");
 
-    // ✅ 4. إرسال المجسمات لنظام الفيزياء ليمنع اختراق الجدران
+    // 4. التصادمات (المنازل)
     GameCollision::AddCollider(houseModel, MatrixTranslate(10, 0, -15));
     GameCollision::AddCollider(houseModel, MatrixTranslate(30, 0, -40));
     GameCollision::AddCollider(houseModel, MatrixTranslate(20, 0, 20));
@@ -174,11 +203,10 @@ int main() {
         car->position = pos;
         car->quaternion = QuaternionIdentity();
         car->active = true;
-        car->exactSize = {2.0f, 1.5f, 4.5f}; // هام لمنع الانهيار
+        car->exactSize = {2.0f, 1.5f, 4.5f}; 
         gameCars.push_back(car);
     }
 
-    // ✅ 5. تهيئة الأنظمة جميعها (مهم لكي يعمل إطلاق النار والذكاء الاصطناعي)
     CarEngine::Init(gameCars);
     CombatSystem::Init();
     NPCSystem::Init();
@@ -219,7 +247,6 @@ int main() {
             continue;
         }
 
-        // تحديث الأنظمة المستقلة (الأعداء والقتال)
         NPCSystem::Update(delta);
         CombatSystem::Update(delta);
 
@@ -277,11 +304,14 @@ int main() {
 
             if (hitButton) continue;
 
+            // ==========================================
+            // 🔥 تعديل حجم الـ Joystick ليصبح أكبر بكثير 🔥
+            // ==========================================
             if (p.x < screenWidth / 2.0f && !CarEngine::isDriving) {
                 joystickData.active = true;
-                Vector2 joyCenter = { 150.0f, screenHeight - 150.0f }; 
+                Vector2 joyCenter = { 200.0f, screenHeight - 200.0f }; // مساحة قاعدة أكبر 
                 float dist = Vector2Distance(p, joyCenter);
-                joystickData.distance = std::min(dist, 50.0f);
+                joystickData.distance = std::min(dist, 80.0f); // مسافة السحب زادت من 50 إلى 80
                 Vector2 dir = Vector2Normalize(Vector2Subtract(p, joyCenter));
                 joystickData.x = dir.x;
                 joystickData.y = -dir.y; 
@@ -308,9 +338,6 @@ int main() {
         float pitchDiff = targetCameraPitch - currentCameraPitch;
         currentCameraPitch += pitchDiff * dampingFactor;
 
-        // ==========================================
-        // تحديث حالة اللاعب
-        // ==========================================
         if (CarEngine::isDriving) {
             CarEngine::Update(delta);
         } 
@@ -321,7 +348,8 @@ int main() {
             Vector3 rightVector = { cosf(currentCameraYaw), 0.0f, -sinf(currentCameraYaw) };
 
             if (joystickData.active && !isTransitioning) {
-                float strength = fminf(joystickData.distance / 50.0f, 1.0f);
+                // تعديل معادلة السرعة لتتوافق مع المسافة الجديدة لعصا التحكم (80)
+                float strength = fminf(joystickData.distance / 80.0f, 1.0f);
                 float speedMod = (playerStance == "PRONE") ? 0.2f : ((playerStance == "CROUCH") ? 0.4f : 1.0f);
                 float currentSpeed = Lerp(playerSettings.walkSpeed, playerSettings.runSpeed, strength) * speedMod;
 
@@ -342,7 +370,6 @@ int main() {
                 playerVelocity.x = 0; playerVelocity.z = 0;
             }
 
-            // التصادم مع السيارات 
             const float pWidth = 1.0f; const float pLength = 2.4f;
             for (auto car : gameCars) {
                 Vector3 localPos = Vector3Subtract(playerPos, car->position); 
@@ -354,7 +381,6 @@ int main() {
                 }
             }
 
-            // ✅ تفعيل الاصطدام الفعلي للبيئة (الجدران والمنازل - Hover)
             GameCollision::ResolveMovement(playerPos, playerVelocity, delta);
 
             if (playerPos.y <= 0.0f) {
@@ -380,7 +406,6 @@ int main() {
             float offsetZ = cameraDist * cosf(currentCameraYaw) * cosf(currentCameraPitch);
             Vector3 idealCameraPos = { currentCameraTarget.x + offsetX, currentCameraTarget.y + offsetY, currentCameraTarget.z + offsetZ };
 
-            // ✅ منع الكاميرا من اختراق المنازل والجدران (Raycast)
             Vector3 camDirToIdeal = Vector3Normalize(Vector3Subtract(idealCameraPos, currentCameraTarget));
             float expectedDist = Vector3Distance(idealCameraPos, currentCameraTarget);
             Vector3 hitPoint;
@@ -397,33 +422,30 @@ int main() {
         }
 
         // ==========================================
-        // الرسم (Rendering Pass)
+        // الرسم (Rendering)
         // ==========================================
         BeginDrawing();
-        ClearBackground((Color){ 214, 234, 248, 255 }); 
+        ClearBackground((Color){ 135, 206, 235, 255 }); // سماء نهارية زرقاء
 
         BeginMode3D(camera);
             
-            // ✅ رسم الأرضية بصورة الـ Texture بدلا من اللون السادة
+            // رسم الأرضية الحقيقية (بإضاءة ومقاسات طبيعية)
             DrawModel(groundModel, {0,0,0}, 1.0f, WHITE);
 
-            // رسم البيئة
             DrawModel(houseModel, (Vector3){10, 0, -15}, 1.0f, WHITE);
             DrawModel(houseModel, (Vector3){30, 0, -40}, 1.0f, WHITE);
             DrawModel(houseModel, (Vector3){20, 0, 20}, 1.0f, WHITE);
             DrawModel(houseModel, (Vector3){-20, 0, -20}, 1.0f, WHITE);
 
-            // رسم السيارات
             for (auto car : gameCars) {
                 DrawModelEx(carModel, car->position, {0,1,0}, car->quaternion.y * (180.0f/PI), {1.2f, 1.2f, 1.2f}, WHITE);
             }
 
-            // رسم اللاعب
             if (!isScoped && !isDead && !CarEngine::isDriving) {
-                DrawModelEx(playerModel, playerPos, {0,1,0}, currentCameraYaw * (180.0f/PI), {0.01f, 0.01f, 0.01f}, WHITE);
+                // 🔥 تصحيح حجم اللاعب بحجمه الواقعي (0.015) 🔥
+                DrawModelEx(playerModel, playerPos, {0,1,0}, currentCameraYaw * (180.0f/PI), {0.015f, 0.015f, 0.015f}, WHITE);
             }
 
-            // رسم الأعداء والرصاص
             NPCSystem::Draw3D();
             CombatSystem::Draw3D();
 
@@ -446,11 +468,12 @@ int main() {
             NPCSystem::DrawUI(screenWidth, screenHeight, camera);
             CombatSystem::DrawUI(screenWidth, screenHeight);
 
+            // 🔥 رسم دائرة الجويستيك بحجم عملاق وواضح جداً 🔥
             if (joystickData.active) {
-                Vector2 joyCenter = { 150.0f, screenHeight - 150.0f };
-                DrawCircleV(joyCenter, 60.0f, Fade(WHITE, 0.1f));
+                Vector2 joyCenter = { 200.0f, screenHeight - 200.0f };
+                DrawCircleV(joyCenter, 100.0f, Fade(WHITE, 0.1f)); // الدائرة الخارجية كبرت من 60 لـ 100
                 DrawCircleV({joyCenter.x + (joystickData.x * joystickData.distance), 
-                             joyCenter.y + (-joystickData.y * joystickData.distance)}, 25.0f, Fade(WHITE, 0.5f));
+                             joyCenter.y + (-joystickData.y * joystickData.distance)}, 40.0f, Fade(WHITE, 0.5f)); // المقبض كبر من 25 لـ 40
             }
         }
 

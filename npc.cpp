@@ -13,7 +13,6 @@
 
 // ==========================================
 // المتغيرات الخارجية (External Bindings)
-// للربط مع الأنظمة الأخرى بسلاسة
 // ==========================================
 extern Vector3 playerPos;
 extern bool isDead;
@@ -25,7 +24,6 @@ struct EnvironmentObject {
 extern std::vector<EnvironmentObject> environmentObjects;
 extern std::vector<CarObject*> gameCars;
 
-// ربط دالة الإطلاق من نظام القتال
 namespace CombatSystem {
     extern void SpawnBullet(Vector3 startPos, Vector3 targetPos, bool isPlayerBullet, float baseDamage);
 }
@@ -36,7 +34,7 @@ namespace NPCSystem {
     Model sharedNpcModel;
     bool isInitialized = false;
 
-    // إعدادات الذكاء الاصطناعي
+    // إعدادات الذكاء الاصطناعي التكتيكي
     struct {
         float walkSpeed = 1.8f;
         float runSpeed = 4.8f;
@@ -44,11 +42,10 @@ namespace NPCSystem {
         float rotationSpeed = 6.0f;
         int spawnCount = 6;
         float maxHealth = 100.0f;
-        float sightRange = 45.0f;
+        float sightRange = 60.0f; // زيادة مسافة الرؤية لتناسب الخريطة المفتوحة
         float npcDamage = 10.0f;
     } settings;
 
-    // دوال مساعدة معرّفة مسبقاً
     void AssignNewTask(NPCObject* npc);
     void FindCover(NPCObject* npc);
     void HandleDriving(NPCObject* npc, float delta);
@@ -59,17 +56,21 @@ namespace NPCSystem {
     void Init() {
         if (isInitialized) return;
 
-        // تحميل الموديل مرة واحدة فقط للجميع (وفر هائل في الذاكرة)
-        sharedNpcModel = LoadModel("assets/player.glb");
-        sharedNpcModel.transform = MatrixScale(0.01f, 0.01f, 0.01f);
+        sharedNpcModel = LoadModel("player.glb");
+        // تم إلغاء MatrixScale لتجنب التصغير المزدوج والمجهري
 
         for (int i = 0; i < settings.spawnCount; i++) {
             NPCObject* npc = new NPCObject();
             
-            float startX = ((float)GetRandomValue(-400, 400) / 10.0f);
-            float startZ = ((float)GetRandomValue(-400, 400) / 10.0f);
+            // خوارزمية إبعاد الأعداء بمسافة آمنة (من 50 إلى 150 متر) حول اللاعب
+            float distX = (float)GetRandomValue(500, 1500) / 10.0f;
+            float distZ = (float)GetRandomValue(500, 1500) / 10.0f;
             
-            npc->position = { startX, 10.0f, startZ }; // السقوط من السماء لتصحيح الارتفاع
+            // توزيع عشوائي في جميع الاتجاهات (شمال، جنوب، شرق، غرب)
+            if (GetRandomValue(0, 1) == 0) distX *= -1.0f;
+            if (GetRandomValue(0, 1) == 0) distZ *= -1.0f;
+            
+            npc->position = { playerPos.x + distX, 10.0f, playerPos.z + distZ };
             npc->velocity = { 0.0f, 0.0f, 0.0f };
             npc->rotationY = 0.0f;
             npc->state = "ROAM";
@@ -77,7 +78,10 @@ namespace NPCSystem {
             npc->health = settings.maxHealth;
             npc->fireTimer = 0.0f;
             npc->taskTimer = 0.0f;
-            npc->aiTimer = 0.0f;
+            
+            // 🔥 فترة سماح تكتيكية 10 ثوانٍ لا يلاحظونك فيها 🔥
+            npc->aiTimer = 10.0f; 
+            
             npc->targetCar = nullptr;
             npc->active = true;
             
@@ -88,32 +92,40 @@ namespace NPCSystem {
     }
 
     // ==========================================
-    // نظام تلقي الضرر واتخاذ القرارات
+    // نظام تلقي الضرر
     // ==========================================
-    void DamageNPC(NPCObject* npc, float amount) {
-        if (npc->state == "DEAD") return;
+    // ربط متغيرات القتلات والأحياء من main.cpp
+extern int totalAlivePlayers;
+extern int myKillCount;
 
-        npc->health -= amount;
+void DamageNPC(NPCObject* npc, float amount) {
+    if (npc->state == "DEAD") return;
 
-        if (npc->health <= 0) {
-            npc->health = 0;
-            npc->state = "DEAD";
-            npc->velocity = { 0.0f, 0.0f, 0.0f };
-            // (سيتم تشغيل أنميشن الموت 'die_7' عبر نظام الأنميشن الخارجي)
-        } else {
-            // تكتيك: الانسحاب والبحث عن ساتر إذا قاربت الصحة على الانتهاء
-            if (npc->health < 40.0f && npc->state != "TAKE_COVER" && npc->state != "CAMP") {
-                npc->state = "TAKE_COVER";
-                FindCover(npc);
-            } else if (npc->state != "TAKE_COVER" && npc->state != "CAMP") {
-                // الالتفاف والاشتباك فوراً عند تلقي طلقة
-                npc->state = "ENGAGE";
-            }
+    npc->health -= amount;
+
+    if (npc->health <= 0) {
+        npc->health = 0;
+        npc->state = "DEAD";
+        npc->velocity = { 0.0f, 0.0f, 0.0f };
+
+        // 🔥 تحديث العدادات فور مقتل العدو 🔥
+        myKillCount++;         // زيادة عدد قتلاتك بمقدار 1
+        totalAlivePlayers--;   // نقص عدد الأحياء بمقدار 1
+        if (totalAlivePlayers < 1) totalAlivePlayers = 1; // لكي لا يزل إلى أقل من 1 حتى تنتهي اللعبة
+
+    } else {
+        if (npc->health < 40.0f && npc->state != "TAKE_COVER" && npc->state != "CAMP") {
+            npc->state = "TAKE_COVER";
+            FindCover(npc);
+        } else if (npc->state != "TAKE_COVER" && npc->state != "CAMP") {
+            npc->state = "ENGAGE";
         }
     }
+}
+
 
     // ==========================================
-    // التكتيك: البحث عن ساتر (Cover System)
+    // التكتيك: البحث عن ساتر
     // ==========================================
     void FindCover(NPCObject* npc) {
         if (environmentObjects.empty()) {
@@ -121,18 +133,16 @@ namespace NPCSystem {
             return;
         }
 
-        // اختيار مبنى عشوائي كساتر
         int randIdx = GetRandomValue(0, environmentObjects.size() - 1);
         Vector3 bestCover = environmentObjects[randIdx].position;
-        
         Vector3 dirFromPlayer = Vector3Normalize(Vector3Subtract(bestCover, playerPos));
-        // الاختباء 4 أمتار خلف المبنى عكس اتجاه اللاعب
+        
         npc->targetPoint = Vector3Add(bestCover, Vector3Scale(dirFromPlayer, 4.0f));
         npc->taskTimer = 8.0f;
     }
 
     // ==========================================
-    // التكتيك: تعيين مهمة جديدة (Task Assignment)
+    // التكتيك: تعيين مهمة جديدة
     // ==========================================
     void AssignNewTask(NPCObject* npc) {
         if (npc->state == "DEAD") return;
@@ -148,7 +158,7 @@ namespace NPCSystem {
 
         if (randVal < 0.35f) {
             npc->state = "ROAM";
-            npc->targetPoint = { npc->position.x + GetRandomValue(-20, 20), 0.0f, npc->position.z + GetRandomValue(-20, 20) };
+            npc->targetPoint = { npc->position.x + GetRandomValue(-30, 30), 0.0f, npc->position.z + GetRandomValue(-30, 30) };
         } else if (randVal < 0.70f && !environmentObjects.empty()) {
             npc->state = "SEEK_HOUSE";
             int idx = GetRandomValue(0, environmentObjects.size() - 1);
@@ -159,10 +169,8 @@ namespace NPCSystem {
             npc->state = "SEEK_CAR";
             std::vector<CarObject*> availableCars;
             for (auto car : gameCars) {
-                // تجنب ركوب سيارة اللاعب
                 if (!car->isNpcDriven && car != CarEngine::carModel) availableCars.push_back(car);
             }
-            
             if (!availableCars.empty()) {
                 npc->targetCar = availableCars[GetRandomValue(0, availableCars.size() - 1)];
                 npc->targetPoint = npc->targetCar->position;
@@ -174,7 +182,7 @@ namespace NPCSystem {
     }
 
     // ==========================================
-    // حلقة التحديث الشاملة للذكاء الاصطناعي
+    // حلقة التحديث الشاملة
     // ==========================================
     void Update(float delta) {
         if (!isInitialized) return;
@@ -182,16 +190,14 @@ namespace NPCSystem {
         for (auto npc : npcs) {
             if (!npc->active) continue;
 
-            // 1. فيزياء الجاذبية ومنع السقوط (Safety Net)
             npc->velocity.y -= 25.0f * delta;
 
             if (npc->state != "DEAD") {
                 npc->position = Vector3Add(npc->position, Vector3Scale(npc->velocity, delta));
             } else {
-                npc->position.y += npc->velocity.y * delta; // الميت يسقط فقط
+                npc->position.y += npc->velocity.y * delta; 
             }
 
-            // منع السقوط تحت الأرضية الافتراضية
             if (npc->position.y < 0.0f) {
                 npc->position.y = 0.0f;
                 npc->velocity.y = 0.0f;
@@ -206,10 +212,12 @@ namespace NPCSystem {
 
             float distToPlayer = Vector3Distance(npc->position, playerPos);
 
-            // 2. نظام الرؤية التكتيكي (Line of Sight) كل 0.3 ثانية لتخفيف الضغط
+            // ==========================================
+            // نظام الرؤية مع احترام فترة السماح
+            // ==========================================
             npc->aiTimer -= delta;
             if (npc->aiTimer <= 0.0f) {
-                npc->aiTimer = 0.3f;
+                npc->aiTimer = 0.3f; // العودة لنبضات الفحص الطبيعية
                 bool hasLineOfSight = false;
                 
                 if (!isDead && distToPlayer < settings.sightRange) {
@@ -222,7 +230,6 @@ namespace NPCSystem {
                     Ray sightRay = { npcHead, Vector3Normalize(Vector3Subtract(playerHead, npcHead)) };
                     bool hitEnvironment = false;
 
-                    // فحص الشعاع ضد المجسمات (المباني)
                     for (auto& env : environmentObjects) {
                         RayCollision col = GetRayCollisionBox(sightRay, env.bounds);
                         if (col.hit && col.distance < distToPlayer) {
@@ -231,7 +238,7 @@ namespace NPCSystem {
                         }
                     }
 
-                    if (!hitEnvironment) hasLineOfSight = true; // اللاعب مكشوف!
+                    if (!hitEnvironment) hasLineOfSight = true; 
                 }
 
                 if (hasLineOfSight) {
@@ -241,7 +248,9 @@ namespace NPCSystem {
                 }
             }
 
-            // 3. تنفيذ الحالات التكتيكية (State Machine)
+            // ==========================================
+            // تنفيذ الحالات التكتيكية
+            // ==========================================
             npc->targetPoint.y = npc->position.y;
             float distanceToTarget = Vector3Distance(npc->position, npc->targetPoint);
 
@@ -257,7 +266,7 @@ namespace NPCSystem {
 
                 npc->fireTimer -= delta;
                 if (npc->fireTimer <= 0.0f) {
-                    npc->fireTimer = 0.2f + ((float)GetRandomValue(0, 30) / 100.0f);
+                    npc->fireTimer = 0.25f + ((float)GetRandomValue(0, 30) / 100.0f); // سرعة إطلاق واقعية
                     
                     Vector3 gunMuzzle = npc->position;
                     gunMuzzle.y += (npc->tacticalStance == "PRONE") ? 0.3f : ((npc->tacticalStance == "CROUCH") ? 1.0f : 1.3f);
@@ -265,13 +274,11 @@ namespace NPCSystem {
                     Vector3 targetPoint = playerPos;
                     targetPoint.y += 1.0f;
                     
-                    // تشتيت الرصاص التكتيكي
                     targetPoint.x += ((float)GetRandomValue(-15, 15) / 10.0f);
                     targetPoint.z += ((float)GetRandomValue(-15, 15) / 10.0f);
 
                     CombatSystem::SpawnBullet(gunMuzzle, targetPoint, false, settings.npcDamage);
 
-                    // نسبة 10% أن يجلس أثناء القتال للمراوغة
                     if (GetRandomValue(1, 100) <= 10 && npc->tacticalStance == "STAND") {
                         npc->tacticalStance = "CROUCH";
                     }
@@ -282,7 +289,7 @@ namespace NPCSystem {
                 npc->taskTimer -= delta;
                 if (npc->taskTimer <= 0.0f) AssignNewTask(npc);
             } 
-            else { // الحركة (ROAM, SEEK_HOUSE, TAKE_COVER)
+            else { 
                 if (distanceToTarget > 1.5f) {
                     Vector3 dir = Vector3Normalize(Vector3Subtract(npc->targetPoint, npc->position));
                     float targetRotation = atan2f(dir.x, dir.z);
@@ -351,9 +358,7 @@ namespace NPCSystem {
         Vector3 forwardVec = { sinf(car->rotation.y), 0, cosf(car->rotation.y) };
         Vector3 testPos = Vector3Add(car->position, Vector3Scale(forwardVec, settings.driveSpeed * delta));
         
-        // تبسيط الاصطدام للسيارات التي يقودها الأعداء (فحص حافة الشاشة أو الجدران البسيطة)
         car->position = testPos;
-        
         if (car->position.y < 0.0f) car->position.y = 0.0f;
     }
 
@@ -365,36 +370,35 @@ namespace NPCSystem {
         for (auto npc : npcs) {
             if (!npc->active || npc->state == "DRIVING") continue;
             
-            // في حالة الموت، نجعلهم منبطحين
             float drawRot = npc->rotationY * (180.0f / PI);
+            
+            // تلوين الأعداء بمسحة حمراء خفيفة جداً لتمييزهم، مع الحفاظ على الحجم الطبيعي 0.015
+            Color tintColor = { 255, 200, 200, 255 }; 
+
             if (npc->state == "DEAD") {
-                DrawModelEx(sharedNpcModel, npc->position, {1,0,0}, -90.0f, {0.01f, 0.01f, 0.01f}, GRAY);
+                DrawModelEx(sharedNpcModel, npc->position, {1,0,0}, -90.0f, {0.015f, 0.015f, 0.015f}, GRAY);
             } else {
-                DrawModelEx(sharedNpcModel, npc->position, {0,1,0}, drawRot, {0.01f, 0.01f, 0.01f}, WHITE);
+                DrawModelEx(sharedNpcModel, npc->position, {0,1,0}, drawRot, {0.015f, 0.015f, 0.015f}, tintColor);
             }
         }
     }
 
     // ==========================================
-    // رسم واجهة الصحة 2D بذكاء (World To Screen)
+    // رسم واجهة الصحة 2D بذكاء
     // ==========================================
     void DrawUI(int screenWidth, int screenHeight, Camera3D camera) {
         if (!isInitialized) return;
         for (auto npc : npcs) {
             if (!npc->active || npc->state == "DEAD" || npc->state == "DRIVING" || npc->health >= settings.maxHealth) continue;
 
-            // تحديد موقع شريط الصحة بناءً على وضعية العدو
             Vector3 headPos = npc->position;
             headPos.y += (npc->tacticalStance == "PRONE") ? 0.8f : (npc->tacticalStance == "CROUCH" ? 1.5f : 2.2f);
             
-            // تحويل النقطة من عالم 3D إلى شاشة 2D
             Vector2 screenPos = GetWorldToScreen(headPos, camera);
             
-            // التأكد أن العدو أمام الكاميرا (في الشاشة)
             if (screenPos.x > 0 && screenPos.x < screenWidth && screenPos.y > 0 && screenPos.y < screenHeight) {
                 float dist = Vector3Distance(camera.position, headPos);
                 
-                // تصغير الشريط كلما ابتعد العدو
                 float scale = 1.0f / fmaxf(1.0f, dist * 0.1f);
                 float width = 80.0f * scale;
                 float height = 10.0f * scale;
