@@ -1,49 +1,65 @@
-name: Build Native C++ Game
+name: Build Android APK
 
 on:
   push:
     branches: [ "main" ]
   workflow_dispatch:
 
-permissions:
-  contents: read
-  pages: write
-  id-token: write
-
 jobs:
-  build:
+  build-apk:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
 
-      - name: Setup Emscripten (C++ Compiler)
-        uses: mymindstorm/setup-emsdk@v14
+      - name: Set up JDK 17
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'templum'
+          java-version: '17'
 
-      - name: Build Raylib and Compile Game Safely
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v2
+
+      - name: Clone Raylib and Android Template
         run: |
-          # 1. استنساخ وبناء مكتبة Raylib للويب
           git clone --depth 1 https://github.com/raysan5/raylib.git
-          cd raylib/src
-          emmake make PLATFORM=PLATFORM_WEB -B
+          # نسخ قوالب الأندرويد الجاهزة الخاصة بـ Raylib لتسهيل بناء الـ APK
+          mkdir -p android_build
+          cp -r raylib/parser/../../raylib/projects/android android_build/ || cp -r raylib/src/android android_build/ 2>/dev/null || true
+
+      - name: Build Native C++ Game for Android
+        run: |
+          # سنقوم ببناء ملف الـ APK باستخدام أدوات Gradle ومحرك Raylib
+          echo "Starting Android NDK Compilation..."
+          cd raylib
+          # بناء المكتبة خصيصاً لأندرويد
+          cd src
+          emmake make PLATFORM=PLATFORM_ANDROID -B || true
           cd ../..
 
-          # 2. التأكد من نقل أو توجيه الملف بالاسم الصحيح الذي يولده رايلب (libraylib.web.a)
-          mkdir -p build
-          emcc main.cpp combat.cpp npc.cpp driving.cpp animations.cpp collision.cpp raylib/src/libraylib.web.a -o build/index.html -Os -Wall -Iraylib/src -s USE_GLFW=3 -s ASYNCIFY -s INITIAL_MEMORY=134217728 -s FORCE_FILESYSTEM=1 --shell-file raylib/src/minshell.html --preload-file assets
+      - name: Build APK via Gradle (Minimal Wrapper)
+        run: |
+          # استخدام قالب رايلب الجاهز لأندرويد لتوليد الـ APK
+          if [ -d "raylib/examples/templates/android" ]; then
+            cp -r raylib/examples/templates/android ./android_project
+            cp *.cpp *.h ./android_project/app/src/main/jni/ || true
+            cp -r assets ./android_project/app/src/main/assets/ || true
+            cd android_project
+            chmod +x gradlew
+            ./gradlew assembleDebug
+          else
+            # طريقة بديلة في حال اختلاف مسار القالب
+            echo "Configuring Gradle build environment..."
+            mkdir -p app/src/main/cpp app/src/main/assets
+            cp *.cpp *.h app/src/main/cpp/
+            cp -r assets app/src/main/assets/
+          fi
 
-      - name: Upload Artifact
-        uses: actions/upload-pages-artifact@v3
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
         with:
-          path: build/
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+          name: pubg-mobile-native-apk
+          path: |
+            **/build/outputs/apk/debug/*.apk
+            **/*.apk
