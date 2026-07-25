@@ -40,20 +40,13 @@ jobs:
             cp -r assets/* android_app/app/src/main/assets/
           fi
 
-          # 5. إعداد ملف settings.gradle مع تعريف مصادر الـ Plugins لتجنب خطأ الإيجاد
+          # 5. إعداد ملف settings.gradle بدون الخصائص القديمة لضمان التوافق مع Gradle الحديث
           cat << 'EOF' > android_app/settings.gradle
           pluginManagement {
               repositories {
                   google()
                   mavenCentral()
                   gradlePluginPortal()
-              }
-          }
-          dependencyResolutionManagement {
-              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOSITORIES)
-              repositories {
-                  google()
-                  mavenCentral()
               }
           }
           rootProject.name = "pubg_native"
@@ -121,10 +114,14 @@ jobs:
           </manifest>
           EOF
 
-          # 8. كتابة ملفات بناء Gradle للإصدار
+          # 8. كتابة ملفات بناء Gradle للإصدار مع تحديد مستودعات Google و Maven
           cat << 'EOF' > android_app/app/build.gradle
           plugins {
               id 'com.android.application'
+          }
+          repositories {
+              google()
+              mavenCentral()
           }
           android {
               namespace 'com.pubg.native'
