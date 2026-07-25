@@ -1,16 +1,25 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.22.1)
 
-# اسم المشروع (بديل وسم <title>)
-project(PUBG_Mobile_TPS_Native)
+project(pubg_native)
 
-# تحديد معيار C++ (نستخدم C++17 للأداء العالي)
+set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# تضمين مكتبة Raylib (بديل three.min.js و three-mesh-bvh)
-find_package(raylib REQUIRED)
+add_definitions(
+    -DPLATFORM_ANDROID
+    -DGRAPHICS_API_OPENGL_ES2
+)
 
-# جمع كل ملفات اللعبة معاً (البديل الحرفي لترتيب وسوم <script>)
-set(GAME_SOURCES
+set(RAYLIB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/raylib_src)
+
+include_directories(
+    ${RAYLIB_DIR}
+    ${RAYLIB_DIR}/external/glfw/include
+)
+
+add_library(pubg_native SHARED
+
     main.cpp
     settings.cpp
     animations.cpp
@@ -18,10 +27,32 @@ set(GAME_SOURCES
     driving.cpp
     combat.cpp
     npc.cpp
+
+    ${RAYLIB_DIR}/rcore.c
+    ${RAYLIB_DIR}/rmodels.c
+    ${RAYLIB_DIR}/rtextures.c
+    ${RAYLIB_DIR}/rtext.c
+    ${RAYLIB_DIR}/rshapes.c
+    ${RAYLIB_DIR}/raudio.c
+    ${RAYLIB_DIR}/utils.c
 )
 
-# بناء التطبيق التنفيذي (أو الـ APK)
-add_executable(${PROJECT_NAME} ${GAME_SOURCES})
+find_library(log-lib log)
+find_library(android-lib android)
+find_library(EGL-lib EGL)
+find_library(GLESv2-lib GLESv2)
+find_library(OpenSLES-lib OpenSLES)
+find_library(m-lib m)
+find_library(dl-lib dl)
 
-# ربط محرك Raylib بملفات اللعبة
-target_link_libraries(${PROJECT_NAME} raylib)
+target_link_libraries(
+    pubg_native
+
+    ${log-lib}
+    ${android-lib}
+    ${EGL-lib}
+    ${GLESv2-lib}
+    ${OpenSLES-lib}
+    ${m-lib}
+    ${dl-lib}
+)
