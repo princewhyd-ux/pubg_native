@@ -43,28 +43,83 @@ jobs:
         run: |
           wget https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip
           unzip gradle-${GRADLE_VERSION}-bin.zip
-          cp -r gradle-${GRADLE_VERSION} gradle-home
 
       - name: Clone Raylib
         run: |
           git clone --depth=1 https://github.com/raysan5/raylib.git
 
-      - name: Create Android Project Structure
+      - name: Create Android Project Structure inside app/
         run: |
-          mkdir -p app
-          mkdir -p app/src/main
-          mkdir -p app/src/main/java
+          mkdir -p app/src/main/java/com/pubg/nativegame
           mkdir -p app/src/main/cpp
           mkdir -p app/src/main/assets
-          mkdir -p app/src/main/res
           mkdir -p app/src/main/res/values
           mkdir -p app/src/main/res/xml
           mkdir -p app/src/main/res/drawable
-          mkdir -p app/src/main/res/mipmap-anydpi-v26
-          mkdir -p gradle
           mkdir -p gradle/wrapper
 
-      - name: Create settings.gradle
+      - name: Copy Game Sources & Assets to app/src/main/cpp
+        run: |
+          cp *.cpp app/src/main/cpp/ 2>/dev/null || true
+          cp *.c app/src/main/cpp/ 2>/dev/null || true
+          cp *.h app/src/main/cpp/ 2>/dev/null || true
+          cp *.hpp app/src/main/cpp/ 2>/dev/null || true
+
+          if [ -d assets ]; then
+              cp -r assets/* app/src/main/assets/
+          fi
+
+          # نسخ مصادر Raylib المطلوبة للترجمة
+          cp -r raylib/src app/src/main/cpp/raylib_src
+          mkdir -p app/src/main/cpp/raylib_src/external
+          cp -r raylib/src/external/* app/src/main/cpp/raylib_src/external/
+
+      - name: Create CMakeLists.txt inside app/src/main/cpp/
+        run: |
+          cat > app/src/main/cpp/CMakeLists.txt <<'EOF'
+          cmake_minimum_required(VERSION 3.22.1)
+          project(pubg_native)
+
+          set(CMAKE_CXX_STANDARD 17)
+          add_definitions(-DPLATFORM_ANDROID -DGRAPHICS_API_OPENGL_ES2)
+
+          include_directories(
+              .
+              raylib_src
+              raylib_src/external/glfw/include
+          )
+
+          add_library(pubg_native SHARED
+              main.cpp
+              combat.cpp
+              npc.cpp
+              driving.cpp
+              animations.cpp
+              collision.cpp
+              raylib_src/rcore.c
+              raylib_src/rshapes.c
+              raylib_src/rtextures.c
+              raylib_src/rtext.c
+              raylib_src/rmodels.c
+              raylib_src/raudio.c
+          )
+
+          find_library(log-lib log)
+          find_library(glesv-lib GLESv2)
+          find_library(egl-lib EGL)
+          find_library(android-lib android)
+          find_library(m-lib m)
+
+          target_link_libraries(pubg_native
+              ${log-lib}
+              ${glesv-lib}
+              ${egl-lib}
+              ${android-lib}
+              ${m-lib}
+          )
+          EOF
+
+      - name: Create settings.gradle in Root
         run: |
           cat > settings.gradle <<'EOF'
           pluginManagement {
@@ -121,19 +176,13 @@ jobs:
           zipStorePath=wrapper/dists
           EOF
 
-      - name: Download Gradle Wrapper JAR
+      - name: Download Gradle Wrapper JAR & gradlew
         run: |
           wget https://raw.githubusercontent.com/gradle/gradle/v8.3.0/gradle/wrapper/gradle-wrapper.jar \
           -O gradle/wrapper/gradle-wrapper.jar
-
-      - name: Create gradlew
-        run: |
           wget https://raw.githubusercontent.com/gradle/gradle/v8.3.0/gradlew
-          chmod +x gradlew
-
-      - name: Create gradlew.bat
-        run: |
           wget https://raw.githubusercontent.com/gradle/gradle/v8.3.0/gradlew.bat
+          chmod +x gradlew
 
       - name: Create app/build.gradle
         run: |
@@ -183,7 +232,7 @@ jobs:
           }
           EOF
 
-      - name: Create AndroidManifest
+      - name: Create AndroidManifest.xml
         run: |
           cat > app/src/main/AndroidManifest.xml <<'EOF'
           <?xml version="1.0" encoding="utf-8"?>
@@ -219,118 +268,15 @@ jobs:
           </resources>
           EOF
 
-          cat > app/src/main/res/xml/backup_rules.xml <<EOF
-          <?xml version="1.0" encoding="utf-8"?>
-          <full-backup-content/>
-          EOF
-
-          touch app/src/main/res/drawable/ic_launcher_background.xml
-
-      - name: Copy Game Sources
-        run: |
-          cp *.cpp app/src/main/cpp/ 2>/dev/null || true
-          cp *.c app/src/main/cpp/ 2>/dev/null || true
-          cp *.h app/src/main/cpp/ 2>/dev/null || true
-          cp *.hpp app/src/main/cpp/ 2>/dev/null || true
-
-          if [ -f CMakeLists.txt ]; then
-              cp CMakeLists.txt app/src/main/cpp/
-          fi
-
-          if [ -d assets ]; then
-              cp -r assets/* app/src/main/assets/
-          fi
-
-      - name: Copy Raylib Sources
-        run: |
-          cp -r raylib/src app/src/main/cpp/raylib_src
-          mkdir -p app/src/main/cpp/raylib_src/external
-          cp -r raylib/src/external/* app/src/main/cpp/raylib_src/external/
-
-      - name: Ensure CMakeLists.txt Exists
-        run: |
-          if [ ! -f app/src/main/cpp/CMakeLists.txt ]; then
-              cat > app/src/main/cpp/CMakeLists.txt <<'EOF'
-              cmake_minimum_required(VERSION 3.22.1)
-              project(pubg_native)
-
-              set(CMAKE_CXX_STANDARD 17)
-              add_definitions(-DPLATFORM_ANDROID -DGRAPHICS_API_OPENGL_ES2)
-
-              include_directories(
-                  .
-                  raylib_src
-                  raylib_src/external/glfw/include
-              )
-
-              add_library(pubg_native SHARED
-                  main.cpp
-                  combat.cpp
-                  npc.cpp
-                  driving.cpp
-                  animations.cpp
-                  collision.cpp
-                  raylib_src/rcore.c
-                  raylib_src/rshapes.c
-                  raylib_src/rtextures.c
-                  raylib_src/rtext.c
-                  raylib_src/rmodels.c
-                  raylib_src/raudio.c
-              )
-
-              find_library(log-lib log)
-              find_library(glesv-lib GLESv2)
-              find_library(egl-lib EGL)
-              find_library(android-lib android)
-              find_library(m-lib m)
-
-              target_link_libraries(pubg_native
-                  ${log-lib}
-                  ${glesv-lib}
-                  ${egl-lib}
-                  ${android-lib}
-                  ${m-lib}
-              )
-          EOF
-          fi
-
-      - name: Verify Project Files
-        run: |
-          echo "===== CPP ====="
-          find app/src/main/cpp
-          echo "===== Assets ====="
-          find app/src/main/assets || true
-          echo "===== Resources ====="
-          find app/src/main/res
-          echo "===== Manifest ====="
-          cat app/src/main/AndroidManifest.xml
-
-      - name: Prepare Build
-        run: |
-          chmod +x gradlew
-          export ANDROID_HOME=$ANDROID_SDK_ROOT
-          export ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/${ANDROID_NDK_VERSION}
-          export ANDROID_NDK_ROOT=$ANDROID_NDK_HOME
-          export PATH=$ANDROID_HOME/platform-tools:$PATH
-
-      - name: Build Debug APK
+      - name: Build APK via Gradle
         run: |
           export ANDROID_HOME=$ANDROID_SDK_ROOT
           export ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/${ANDROID_NDK_VERSION}
           export ANDROID_NDK_ROOT=$ANDROID_NDK_HOME
-          ./gradlew clean assembleDebug --stacktrace --info --no-daemon
+          ./gradlew assembleDebug --stacktrace --no-daemon
 
-      - name: Build Release APK
-        run: |
-          export ANDROID_HOME=$ANDROID_SDK_ROOT
-          export ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/${ANDROID_NDK_VERSION}
-          export ANDROID_NDK_ROOT=$ANDROID_NDK_HOME
-          ./gradlew assembleRelease --stacktrace --info --no-daemon
-
-      - name: Upload Release APK
+      - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: PUBG-Native-Release
-          path: |
-            app/build/outputs/apk/release/*.apk
-            app/build/outputs/apk/debug/*.apk
+          name: PUBG-Native-APK
+          path: app/build/outputs/apk/debug/*.apk
