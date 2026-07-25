@@ -60,6 +60,7 @@ jobs:
 
       - name: Copy Game Sources & Assets to app/src/main/cpp
         run: |
+          # نسخ ملفاتك الأصلية كاملة
           cp *.cpp app/src/main/cpp/ 2>/dev/null || true
           cp *.c app/src/main/cpp/ 2>/dev/null || true
           cp *.h app/src/main/cpp/ 2>/dev/null || true
@@ -83,7 +84,10 @@ jobs:
           set(CMAKE_CXX_STANDARD 17)
           add_definitions(-DPLATFORM_ANDROID -DGRAPHICS_API_OPENGL_ES2)
 
-          # تضمين مسار مكتبة الجسر الخاصة بأندرويد (Native App Glue)
+          # 🚀 السطر السحري لحل مشكلة قراءة الملفات __real_fopen في الأندرويد 🚀
+          set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-wrap,fopen")
+
+          # تضمين مسارات الجسر الخاص بأندرويد Native App Glue
           include_directories(
               .
               raylib_src
@@ -91,7 +95,6 @@ jobs:
               ${ANDROID_NDK}/sources/android/native_app_glue
           )
 
-          # إضافة ملف الـ C الخاص بـ Native App Glue لكي يترجم مع المشروع
           add_library(pubg_native SHARED
               main.cpp
               combat.cpp
