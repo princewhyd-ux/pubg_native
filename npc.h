@@ -28,6 +28,9 @@ namespace NPCSystem {
     extern std::vector<NPCObject*> npcs;
     extern Model sharedNpcModel; // لتوفير الذاكرة، نحمل الموديل مرة واحدة ونرسمه للجميع
     
+    extern int totalAlivePlayers;
+    extern int myKillCount;
+    
     void Init();
     void Update(float delta);
     void Draw3D();

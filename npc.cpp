@@ -33,6 +33,9 @@ namespace NPCSystem {
     std::vector<NPCObject*> npcs;
     Model sharedNpcModel;
     bool isInitialized = false;
+    
+    int totalAlivePlayers = 7; 
+    int myKillCount = 0;
 
     // إعدادات الذكاء الاصطناعي التكتيكي
     struct {
@@ -99,29 +102,29 @@ extern int totalAlivePlayers;
 extern int myKillCount;
 
 void DamageNPC(NPCObject* npc, float amount) {
-    if (npc->state == "DEAD") return;
+        if (npc->state == "DEAD") return;
 
-    npc->health -= amount;
+        npc->health -= amount;
 
-    if (npc->health <= 0) {
-        npc->health = 0;
-        npc->state = "DEAD";
-        npc->velocity = { 0.0f, 0.0f, 0.0f };
+        if (npc->health <= 0) {
+            npc->health = 0;
+            npc->state = "DEAD";
+            npc->velocity = { 0.0f, 0.0f, 0.0f };
 
-        // 🔥 تحديث العدادات فور مقتل العدو 🔥
-        myKillCount++;         // زيادة عدد قتلاتك بمقدار 1
-        totalAlivePlayers--;   // نقص عدد الأحياء بمقدار 1
-        if (totalAlivePlayers < 1) totalAlivePlayers = 1; // لكي لا يزل إلى أقل من 1 حتى تنتهي اللعبة
+            // 🔥 تحديث العدادات بدقة متناهية فور موت العدو 🔥
+            myKillCount++;
+            totalAlivePlayers--;
+            if (totalAlivePlayers < 1) totalAlivePlayers = 1;
 
-    } else {
-        if (npc->health < 40.0f && npc->state != "TAKE_COVER" && npc->state != "CAMP") {
-            npc->state = "TAKE_COVER";
-            FindCover(npc);
-        } else if (npc->state != "TAKE_COVER" && npc->state != "CAMP") {
-            npc->state = "ENGAGE";
+        } else {
+            if (npc->health < 40.0f && npc->state != "TAKE_COVER" && npc->state != "CAMP") {
+                npc->state = "TAKE_COVER";
+                FindCover(npc);
+            } else if (npc->state != "TAKE_COVER" && npc->state != "CAMP") {
+                npc->state = "ENGAGE";
+            }
         }
     }
-}
 
 
     // ==========================================

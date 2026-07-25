@@ -107,29 +107,23 @@ void InitHUD(int sw, int sh) {
 void DrawHUD(int sw, int sh) {
     extern int playerHealth; 
     
-    // 1. شريط الصحة للاعب في الأسفل
     DrawRectangle(sw/2 - 125, sh - (sh * 0.05f), 250, 8, Fade(BLACK, 0.6f));
     DrawRectangle(sw/2 - 125, sh - (sh * 0.05f), (int)(250 * (CombatSystem::playerHealth / 100.0f)), 8, GREEN);
 
     // ==========================================
-    // 2. تصميم واجهة القتلات والأحياء (Kill Feed UI)
+    // عدادات القتلات والأحياء الاحترافية (تحديث مباشر)
     // ==========================================
-    // خلفية سوداء شفافة وفاخرة في أعلى الشاشة (جهة اليسار قليلاً أو اليمين)
     DrawRectangle(sw - 220, 20, 200, 65, Fade(BLACK, 0.5f));
     DrawRectangleLines(sw - 220, 20, 200, 65, Fade(WHITE, 0.2f));
 
-    // عدد الأشخاص على قيد الحياة (Alive)
     DrawText("ALIVE", sw - 200, 30, 14, YELLOW);
-    DrawText(TextFormat("%02d", totalAlivePlayers), sw - 140, 27, 22, WHITE);
+    DrawText(TextFormat("%02d", NPCSystem::totalAlivePlayers), sw - 140, 27, 22, WHITE);
 
-    // خط فاصل صغير
     DrawLine(sw - 110, 28, sw - 110, 75, Fade(WHITE, 0.2f));
 
-    // قتلات اللاعب (Kills)
     DrawText("KILLS", sw - 90, 30, 14, RED);
-    DrawText(TextFormat("%02d", myKillCount), sw - 40, 27, 22, WHITE);
+    DrawText(TextFormat("%02d", NPCSystem::myKillCount), sw - 40, 27, 22, WHITE);
 
-    // رسم الأزرار
     for (auto& pair : hudElements) {
         HUDElement& btn = pair.second;
         if (btn.id == "btn-enter" && CarEngine::carModel == nullptr && !isEditMode) continue;
@@ -146,6 +140,7 @@ void DrawHUD(int sw, int sh) {
         DrawTexturePro(btn.tex, {0, 0, (float)btn.tex.width, (float)btn.tex.height}, dest, origin, 0.0f, tint);
     }
 }
+
 
 
 // ==========================================
