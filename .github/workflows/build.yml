@@ -69,6 +69,34 @@ jobs:
               cp -r assets/* app/src/main/assets/
           fi
 
+          # [إصلاح جذري]: فرض كتابة التعريف الكامل لـ CarObject وتجاوز أي ملف driving.h قديم
+          cat > app/src/main/cpp/driving.h <<'EOF'
+          #ifndef DRIVING_H
+          #define DRIVING_H
+
+          #include "raylib.h"
+          #include <vector>
+
+          struct CarObject {
+              Vector3 position;
+              Vector3 velocity;
+              Vector3 rotation;
+              Vector3 size;
+              Vector3 offset;
+              float health;
+              bool active;
+              bool isDriving;
+          };
+
+          namespace CarEngine {
+              void Init(std::vector<CarObject*>& cars);
+              void Update(float delta);
+              void UpdateAndDrawUI(int screenWidth, int screenHeight);
+          }
+
+          #endif
+          EOF
+
           # نسخ مصادر Raylib المطلوبة للترجمة
           cp -r raylib/src app/src/main/cpp/raylib_src
           mkdir -p app/src/main/cpp/raylib_src/external
