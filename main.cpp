@@ -325,7 +325,7 @@ int main() {
         // 🔥 التحديث المستمر للأنيميشن خارج شرط الحركة لمنع الـ T-Pose 🔥
         if (animsCount > 0 && !isDead && !CarEngine::isDriving) {
             animFrameCounter++;
-            if (animFrameCounter >= playerAnimations[0].frameCount) animFrameCounter = 0;
+            if (animFrameCounter >= playerAnimations[0].keyframeCount) animFrameCounter = 0;
             UpdateModelAnimation(playerModel, playerAnimations[0], animFrameCounter);
         }
 
