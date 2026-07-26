@@ -7,9 +7,6 @@
 #include <cmath>
 #include <algorithm>
 
-// ==========================================
-// تضمين ملفات الأنظمة الأخرى
-// ==========================================
 #include "animations.h"
 #include "collision.h"
 #include "combat.h"
@@ -28,9 +25,9 @@ float currentCameraPitch = 0.3f;
 float targetCameraPitch = 0.3f;
 bool isDraggingCamera = false;
 Vector3 playerVelocity = { 0.0f, 0.0f, 0.0f };
-float playerVisualRotation = 0.0f;
-int totalAlivePlayers = 7; // إجمالي اللاعبين (أنت + 6 أعداء)
-int myKillCount = 0;       // عدد قتلاتك
+float playerVisualRotation = 0.0f; 
+int totalAlivePlayers = 7; 
+int myKillCount = 0;       
 
 // هياكل البيئة
 struct EnvironmentObject {
@@ -40,9 +37,6 @@ struct EnvironmentObject {
 std::vector<EnvironmentObject> environmentObjects;
 std::vector<CarObject*> gameCars;
 
-// ==========================================
-// متغيرات النظام الداخلية
-// ==========================================
 const float cameraDist = 1.8f;
 bool isAirborne = false;
 bool isFiring = false;
@@ -51,6 +45,7 @@ std::string playerStance = "STAND";
 bool isTransitioning = false;
 bool isEditMode = false;
 bool settingsOpen = false;
+bool canEnterCar = false; 
 
 struct PlayerSettings {
     float walkSpeed = 4.2f;
@@ -85,7 +80,7 @@ std::map<std::string, HUDElement> hudElements;
 std::string selectedEditBtn = "";
 
 // ==========================================
-// دوال الواجهة والـ HUD (أزرار كبيرة واحترافية)
+// دوال الواجهة والـ HUD
 // ==========================================
 void InitHUD(int sw, int sh) {
     auto AddBtn = [&](std::string id, std::string path, float xPct, float yPct, float size) {
@@ -96,9 +91,8 @@ void InitHUD(int sw, int sh) {
         hudElements[id] = btn;
     };
 
-    // 🔥 تكبير أحجام الأزرار وتعديل أماكنها لتكون مريحة، وإظهار السكوب بوضوح 🔥
-    AddBtn("btn-fire", "hud/fire.png", 82, 70, 100);       // الزر الأكبر
-    AddBtn("btn-scope", "hud/scope.png", 82, 45, 80);  // مرفوع للأعلى ليظهر جيداً
+    AddBtn("btn-fire", "hud/fire.png", 82, 70, 100);       
+    AddBtn("btn-scope", "hud/scope.png", 82, 45, 80);  
     AddBtn("btn-jump", "hud/jump.png", 92, 80, 80);
     AddBtn("btn-crouch", "hud/crouch.png", 82, 88, 80);
     AddBtn("btn-prone", "hud/prone.png", 72, 88, 80);
@@ -111,9 +105,6 @@ void DrawHUD(int sw, int sh) {
     DrawRectangle(sw/2 - 125, sh - (sh * 0.05f), 250, 8, Fade(BLACK, 0.6f));
     DrawRectangle(sw/2 - 125, sh - (sh * 0.05f), (int)(250 * (CombatSystem::playerHealth / 100.0f)), 8, GREEN);
 
-    // ==========================================
-    // عدادات القتلات والأحياء الاحترافية (تحديث مباشر)
-    // ==========================================
     DrawRectangle(sw - 220, 20, 200, 65, Fade(BLACK, 0.5f));
     DrawRectangleLines(sw - 220, 20, 200, 65, Fade(WHITE, 0.2f));
 
@@ -127,7 +118,7 @@ void DrawHUD(int sw, int sh) {
 
     for (auto& pair : hudElements) {
         HUDElement& btn = pair.second;
-        if (btn.id == "btn-enter" && CarEngine::carModel == nullptr && !isEditMode) continue;
+        if (btn.id == "btn-enter" && !canEnterCar && !isEditMode) continue;
         
         Color tint = Fade(btn.isPressed ? GRAY : WHITE, btn.opacity);
         Rectangle dest = { btn.rect.x, btn.rect.y, btn.rect.width * btn.scale, btn.rect.height * btn.scale };
@@ -141,8 +132,6 @@ void DrawHUD(int sw, int sh) {
         DrawTexturePro(btn.tex, {0, 0, (float)btn.tex.width, (float)btn.tex.height}, dest, origin, 0.0f, tint);
     }
 }
-
-
 
 // ==========================================
 // الدالة الرئيسية (حلقة اللعبة)
@@ -165,29 +154,27 @@ int main() {
     float loadProgress = 0.0f;
     Texture2D logoTex = LoadTexture("logo.png");
     
-    // ==========================================
-    // 🔥 إصلاح الأرضية السوداء (UV Scaling) 🔥
-    // ==========================================
+    // 🔥 إصلاح المادة (Material) للأرضية لتجنب السواد في الأندرويد 🔥
     Texture2D groundTex = LoadTexture("ground.png");
     SetTextureWrap(groundTex, TEXTURE_WRAP_REPEAT); 
     Mesh planeMesh = GenMeshPlane(1000.0f, 1000.0f, 50, 50); 
-    
-    // هذا الكود يكرر صورتك 100 مرة على الأرضية لتظهر بتفاصيلها الواقعية ولا تبدو سوداء
     for (int i = 0; i < planeMesh.vertexCount; i++) {
-        planeMesh.texcoords[i*2] *= 100.0f;     // تكرار المحور X
-        planeMesh.texcoords[i*2 + 1] *= 100.0f; // تكرار المحور Y
+        planeMesh.texcoords[i*2] *= 100.0f;     
+        planeMesh.texcoords[i*2 + 1] *= 100.0f; 
     }
     UpdateMeshBuffer(planeMesh, 1, planeMesh.texcoords, planeMesh.vertexCount * 2 * sizeof(float), 0);
-    
     Model groundModel = LoadModelFromMesh(planeMesh);
     groundModel.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = groundTex;
+    groundModel.materials[0].maps[MATERIAL_MAP_DIFFUSE].color = WHITE; // الأمان لمنع السواد
 
-    // 3. تحميل المجسمات (بدون تصغير مزدوج)
+    // تحميل اللاعب والأنيميشن الخاصة به
     Model playerModel = LoadModel("player.glb");
+    int animsCount = 0;
+    ModelAnimation* playerAnimations = LoadModelAnimations("player.glb", &animsCount);
+
     Model houseModel = LoadModel("house.glb");
     Model carModel = LoadModel("car2.glb");
 
-    // 4. التصادمات (المنازل)
     GameCollision::AddCollider(houseModel, MatrixTranslate(10, 0, -15));
     GameCollision::AddCollider(houseModel, MatrixTranslate(30, 0, -40));
     GameCollision::AddCollider(houseModel, MatrixTranslate(20, 0, 20));
@@ -247,6 +234,18 @@ int main() {
         NPCSystem::Update(delta);
         CombatSystem::Update(delta);
 
+        canEnterCar = false;
+        CarObject* nearestCar = nullptr;
+        float minCarDist = 3.5f;
+        for (auto car : gameCars) {
+            float dist = Vector3Distance(playerPos, car->position);
+            if (dist < minCarDist) {
+                minCarDist = dist;
+                nearestCar = car;
+                canEnterCar = true;
+            }
+        }
+
         int touches = GetTouchPointCount();
         joystickData.active = false;
         
@@ -287,13 +286,8 @@ int main() {
                         else if (pair.first == "btn-prone" && !isAirborne && !isTransitioning && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
                             playerStance = (playerStance == "PRONE") ? "STAND" : "PRONE";
                         }
-                        else if (pair.first == "btn-enter" && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-                            CarObject* closest = nullptr; float minDist = 3.5f;
-                            for (auto car : gameCars) {
-                                float d = Vector3Distance(playerPos, car->position);
-                                if (d < minDist) { minDist = d; closest = car; }
-                            }
-                            if (closest && !CarEngine::isDriving) CarEngine::Enter(closest);
+                        else if (pair.first == "btn-enter" && IsMouseButtonPressed(MOUSE_BUTTON_LEFT) && nearestCar) {
+                            CarEngine::Enter(nearestCar);
                         }
                     }
                 }
@@ -301,14 +295,11 @@ int main() {
 
             if (hitButton) continue;
 
-            // ==========================================
-            // 🔥 تعديل حجم الـ Joystick ليصبح أكبر بكثير 🔥
-            // ==========================================
             if (p.x < screenWidth / 2.0f && !CarEngine::isDriving) {
                 joystickData.active = true;
-                Vector2 joyCenter = { 200.0f, screenHeight - 200.0f }; // مساحة قاعدة أكبر 
+                Vector2 joyCenter = { 200.0f, (float)screenHeight - 200.0f }; 
                 float dist = Vector2Distance(p, joyCenter);
-                joystickData.distance = std::min(dist, 80.0f); // مسافة السحب زادت من 50 إلى 80
+                joystickData.distance = std::min(dist, 80.0f);
                 Vector2 dir = Vector2Normalize(Vector2Subtract(p, joyCenter));
                 joystickData.x = dir.x;
                 joystickData.y = -dir.y; 
@@ -328,12 +319,15 @@ int main() {
         if (!hudElements["btn-fire"].isPressed) isFiring = false;
 
         float dampingFactor = 1.0f - expf(-25.0f * delta);
-        float yawDiff = targetCameraYaw - currentCameraYaw;
-        yawDiff = atan2f(sinf(yawDiff), cosf(yawDiff));
-        currentCameraYaw += yawDiff * dampingFactor;
-        
-        float pitchDiff = targetCameraPitch - currentCameraPitch;
-        currentCameraPitch += pitchDiff * dampingFactor;
+        currentCameraYaw += atan2f(sinf(targetCameraYaw - currentCameraYaw), cosf(targetCameraYaw - currentCameraYaw)) * dampingFactor;
+        currentCameraPitch += (targetCameraPitch - currentCameraPitch) * dampingFactor;
+
+        // 🔥 التحديث المستمر للأنيميشن خارج شرط الحركة لمنع الـ T-Pose 🔥
+        if (animsCount > 0 && !isDead && !CarEngine::isDriving) {
+            animFrameCounter++;
+            if (animFrameCounter >= playerAnimations[0].frameCount) animFrameCounter = 0;
+            UpdateModelAnimation(playerModel, playerAnimations[0], animFrameCounter);
+        }
 
         if (CarEngine::isDriving) {
             CarEngine::Update(delta);
@@ -345,7 +339,6 @@ int main() {
             Vector3 rightVector = { cosf(currentCameraYaw), 0.0f, -sinf(currentCameraYaw) };
 
             if (joystickData.active && !isTransitioning) {
-                // تعديل معادلة السرعة لتتوافق مع المسافة الجديدة لعصا التحكم (80)
                 float strength = fminf(joystickData.distance / 80.0f, 1.0f);
                 float speedMod = (playerStance == "PRONE") ? 0.2f : ((playerStance == "CROUCH") ? 0.4f : 1.0f);
                 float currentSpeed = Lerp(playerSettings.walkSpeed, playerSettings.runSpeed, strength) * speedMod;
@@ -361,13 +354,11 @@ int main() {
                     playerVelocity.x = moveVector.x * currentSpeed;
                     playerVelocity.z = moveVector.z * currentSpeed;
     
-    float targetPlayerRot = atan2f(moveVector.x, moveVector.z) * (180.0f / PI);
+                    float targetPlayerRot = atan2f(moveVector.x, moveVector.z) * (180.0f / PI);
                     float angleDiff = targetPlayerRot - playerVisualRotation;
                     while (angleDiff < -180.0f) angleDiff += 360.0f;
                     while (angleDiff > 180.0f) angleDiff -= 360.0f;
                     playerVisualRotation += angleDiff * playerSettings.rotationSpeed * delta;
-                    
-                    animFrameCounter++; // تحديث الأنميشن أثناء الحركة
               
                 } else {
                     playerVelocity.x = 0; playerVelocity.z = 0;
@@ -397,33 +388,33 @@ int main() {
                 isAirborne = true;
             }
 
-            Vector3 idealTargetPos = playerPos;
-            idealTargetPos.y += 1.5f;
+            Vector3 idealTargetPos = { playerPos.x, playerPos.y + 1.5f, playerPos.z };
+            if (isFirstFrame) { currentCameraTarget = idealTargetPos; isFirstFrame = false; } 
+            else { currentCameraTarget = Vector3Lerp(currentCameraTarget, idealTargetPos, 20.0f * delta); }
 
-            if (isFirstFrame) {
-                currentCameraTarget = idealTargetPos;
-                isFirstFrame = false;
-            } else {
-                currentCameraTarget = Vector3Lerp(currentCameraTarget, idealTargetPos, 20.0f * delta);
-            }
+            Vector3 idealCameraPos = { 
+                currentCameraTarget.x + cameraDist * sinf(currentCameraYaw) * cosf(currentCameraPitch), 
+                currentCameraTarget.y + cameraDist * sinf(currentCameraPitch), 
+                currentCameraTarget.z + cameraDist * cosf(currentCameraYaw) * cosf(currentCameraPitch) 
+            };
 
-            float offsetX = cameraDist * sinf(currentCameraYaw) * cosf(currentCameraPitch);
-            float offsetY = cameraDist * sinf(currentCameraPitch);
-            float offsetZ = cameraDist * cosf(currentCameraYaw) * cosf(currentCameraPitch);
-            Vector3 idealCameraPos = { currentCameraTarget.x + offsetX, currentCameraTarget.y + offsetY, currentCameraTarget.z + offsetZ };
-
+            Vector3 targetCamPos = idealCameraPos;
             Vector3 camDirToIdeal = Vector3Normalize(Vector3Subtract(idealCameraPos, currentCameraTarget));
             float expectedDist = Vector3Distance(idealCameraPos, currentCameraTarget);
             Vector3 hitPoint;
             
+            // 🔥 إصلاح زوم الكاميرا المجنون قرب الجدران 🔥
             if (GameCollision::Raycast(currentCameraTarget, camDirToIdeal, hitPoint)) {
                 float hitDist = Vector3Distance(currentCameraTarget, hitPoint);
                 if (hitDist < expectedDist) {
-                    idealCameraPos = Vector3Add(currentCameraTarget, Vector3Scale(camDirToIdeal, fmaxf(0.1f, hitDist - 0.2f)));
+                    // وضع حد آمن (0.5f) يمنع الكاميرا من اختراق رأس اللاعب
+                    float safeDist = fmaxf(0.5f, hitDist - 0.2f);
+                    targetCamPos = Vector3Add(currentCameraTarget, Vector3Scale(camDirToIdeal, safeDist));
                 }
             }
 
-            camera.position = idealCameraPos; 
+            // تنعيم حركة الكاميرا بدلاً من الانتقال المفاجئ (Snap)
+            camera.position = Vector3Lerp(camera.position, targetCamPos, 30.0f * delta);
             camera.target = currentCameraTarget;
         }
 
@@ -431,11 +422,10 @@ int main() {
         // الرسم (Rendering)
         // ==========================================
         BeginDrawing();
-        ClearBackground((Color){ 135, 206, 235, 255 }); // سماء نهارية زرقاء
+        ClearBackground((Color){ 135, 206, 235, 255 }); 
 
         BeginMode3D(camera);
             
-            // رسم الأرضية الحقيقية (بإضاءة ومقاسات طبيعية)
             DrawModel(groundModel, {0,0,0}, 1.0f, WHITE);
 
             DrawModel(houseModel, (Vector3){10, 0, -15}, 1.0f, WHITE);
@@ -448,8 +438,7 @@ int main() {
             }
 
             if (!isScoped && !isDead && !CarEngine::isDriving) {
-                // 🔥 تصحيح حجم اللاعب بحجمه الواقعي (0.015) 🔥
-                DrawModelEx(playerModel, playerPos, {0,1,0}, currentCameraYaw * (180.0f/PI), {0.015f, 0.015f, 0.015f}, WHITE);
+                DrawModelEx(playerModel, playerPos, {0,1,0}, playerVisualRotation, {0.015f, 0.015f, 0.015f}, WHITE);
             }
 
             NPCSystem::Draw3D();
@@ -457,9 +446,6 @@ int main() {
 
         EndMode3D();
 
-        // ==========================================
-        // رسم الواجهة 2D
-        // ==========================================
         if (CarEngine::isDriving) {
             CarEngine::UpdateAndDrawUI(screenWidth, screenHeight);
         } else {
@@ -474,19 +460,18 @@ int main() {
             NPCSystem::DrawUI(screenWidth, screenHeight, camera);
             CombatSystem::DrawUI(screenWidth, screenHeight);
 
-            // 🔥 رسم دائرة الجويستيك بحجم عملاق وواضح جداً 🔥
             if (joystickData.active) {
-                Vector2 joyCenter = { 200.0f, screenHeight - 200.0f };
-                DrawCircleV(joyCenter, 100.0f, Fade(WHITE, 0.1f)); // الدائرة الخارجية كبرت من 60 لـ 100
+                Vector2 joyCenter = { 200.0f, (float)screenHeight - 200.0f };
+                DrawCircleV(joyCenter, 100.0f, Fade(WHITE, 0.1f)); 
                 DrawCircleV({joyCenter.x + (joystickData.x * joystickData.distance), 
-                             joyCenter.y + (-joystickData.y * joystickData.distance)}, 40.0f, Fade(WHITE, 0.5f)); // المقبض كبر من 25 لـ 40
+                             joyCenter.y + (-joystickData.y * joystickData.distance)}, 40.0f, Fade(WHITE, 0.5f)); 
             }
         }
 
         EndDrawing();
     }
 
-    // التنظيف
+    UnloadModelAnimations(playerAnimations, animsCount);
     UnloadModel(playerModel);
     UnloadModel(houseModel);
     UnloadModel(carModel);
