@@ -28,6 +28,7 @@ float currentCameraPitch = 0.3f;
 float targetCameraPitch = 0.3f;
 bool isDraggingCamera = false;
 Vector3 playerVelocity = { 0.0f, 0.0f, 0.0f };
+float playerVisualRotation = 0.0f;
 int totalAlivePlayers = 7; // إجمالي اللاعبين (أنت + 6 أعداء)
 int myKillCount = 0;       // عدد قتلاتك
 
