@@ -97,7 +97,7 @@ void InitHUD(int sw, int sh) {
 
     // 🔥 تكبير أحجام الأزرار وتعديل أماكنها لتكون مريحة، وإظهار السكوب بوضوح 🔥
     AddBtn("btn-fire", "hud/fire.png", 82, 70, 100);       // الزر الأكبر
-    AddBtn("btn-scope", "hud/scope_btn.png", 82, 45, 80);  // مرفوع للأعلى ليظهر جيداً
+    AddBtn("btn-scope", "hud/scope.png", 82, 45, 80);  // مرفوع للأعلى ليظهر جيداً
     AddBtn("btn-jump", "hud/jump.png", 92, 80, 80);
     AddBtn("btn-crouch", "hud/crouch.png", 82, 88, 80);
     AddBtn("btn-prone", "hud/prone.png", 72, 88, 80);
@@ -212,6 +212,7 @@ int main() {
     double startTime = GetTime();
     Vector3 currentCameraTarget = playerPos;
     bool isFirstFrame = true;
+    int animFrameCounter = 0;
 
     // حلقة اللعبة الأساسية
     while (!WindowShouldClose()) {
@@ -358,6 +359,15 @@ int main() {
                     moveVector = Vector3Normalize(moveVector);
                     playerVelocity.x = moveVector.x * currentSpeed;
                     playerVelocity.z = moveVector.z * currentSpeed;
+    
+    float targetPlayerRot = atan2f(moveVector.x, moveVector.z) * (180.0f / PI);
+                    float angleDiff = targetPlayerRot - playerVisualRotation;
+                    while (angleDiff < -180.0f) angleDiff += 360.0f;
+                    while (angleDiff > 180.0f) angleDiff -= 360.0f;
+                    playerVisualRotation += angleDiff * playerSettings.rotationSpeed * delta;
+                    
+                    animFrameCounter++; // تحديث الأنميشن أثناء الحركة
+              
                 } else {
                     playerVelocity.x = 0; playerVelocity.z = 0;
                 }
