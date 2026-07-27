@@ -26,11 +26,9 @@ bool isDraggingCamera = false;
 Vector3 playerVelocity = { 0.0f, 0.0f, 0.0f };
 float playerVisualRotation = 0.0f; 
 
-// يتم جلبها من نظام الـ NPC
 extern int totalAlivePlayers; 
 extern int myKillCount;       
 
-// إعادة حجز الذاكرة لمنع أخطاء الـ Linker
 struct EnvironmentObject {
     Vector3 position;
     BoundingBox bounds;
@@ -50,10 +48,11 @@ bool isTransitioning = false;
 bool isEditMode = false;
 bool canEnterCar = false; 
 
+// تم رفع سرعة استجابة اللاعب ودورانه
 struct PlayerSettings {
     float walkSpeed = 6.0f;
     float runSpeed = 12.0f;
-    float rotationSpeed = 8.0f;
+    float rotationSpeed = 12.0f; 
 } playerSettings;
 
 struct JoystickData {
@@ -63,10 +62,11 @@ struct JoystickData {
     float distance = 0.0f;
 } joystickData;
 
+// 🔥 تم رفع حساسية الكاميرا بمقدار 3 أضعاف لتصبح سلسة وسريعة
 struct EngineSettings {
-    float cameraSens = 0.005f;
-    float cameraSensScoped = 0.002f;
-    int targetFPS = 60; // 60 إطار هو الأكثر استقراراً للهواتف لمنع الحرارة
+    float cameraSens = 0.015f; 
+    float cameraSensScoped = 0.005f;
+    int targetFPS = 60; 
 } gameSettings;
 
 enum BtnType { BTN_FIRE, BTN_SCOPE, BTN_JUMP, BTN_CROUCH, BTN_PRONE, BTN_ENTER, BTN_COUNT };
@@ -79,24 +79,21 @@ struct HUDElement {
 };
 HUDElement hudBtns[BTN_COUNT];
 
-// ==========================================
-// 🔥 أنظمة الإقصاء السريعة (النسخة الآمنة للموبايل)
-// ==========================================
+enum LODLevel { LOD_HIGH, LOD_MED, LOD_LOW, LOD_HIDDEN };
 
-// دالة الإقصاء البصري المحسنة (Cone Culling with Safe Radius)
+inline LODLevel GetLODLevel(float distSqr) {
+    if (distSqr < 3600.0f)  return LOD_HIGH;
+    if (distSqr < 14400.0f) return LOD_MED; 
+    if (distSqr < 40000.0f) return LOD_LOW; 
+    return LOD_HIDDEN;                      
+}
+
 inline bool FastConeCulling(Vector3 pos, Vector3 camPos, Vector3 camForward, float safeRadiusSqr) {
-    // 1. إذا كان المجسم ضمن مسافة الأمان (مثلاً 50 متر للبيوت)، ارسمه دائماً ولا تخفيه أبداً!
     if (Vector3DistanceSqr(pos, camPos) < safeRadiusSqr) return true;
-    
-    // 2. إذا كان أبعد من مسافة الأمان، افحص ما إذا كان يقع أمام الكاميرا
     Vector3 dirToObj = Vector3Normalize(Vector3Subtract(pos, camPos));
-    // 0.2f تعني زاوية رؤية أوسع قليلاً لتجنب اختفاء الحواف
     return Vector3DotProduct(dirToObj, camForward) > 0.2f; 
 }
 
-// ==========================================
-// دوال الواجهة (HUD)
-// ==========================================
 void InitHUD(int sw, int sh) {
     auto SetupBtn = [&](BtnType type, std::string path, float xPct, float yPct, float size) {
         hudBtns[type].tex = LoadTexture(path.c_str());
@@ -141,12 +138,10 @@ void DrawHUD(int sw, int sh) {
     }
 }
 
-// ==========================================
-// الدالة الرئيسية (Game Loop)
-// ==========================================
 int main() {
-    SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_WINDOW_HIGHDPI | FLAG_FULLSCREEN_MODE);
-    InitWindow(0, 0, "PUBG Mobile Native - Optimized");
+    // 🔥 تم إزالة MSAA 4X القاتل لكرت الشاشة 🔥
+    SetConfigFlags(FLAG_WINDOW_HIGHDPI | FLAG_FULLSCREEN_MODE);
+    InitWindow(0, 0, "PUBG Mobile Native - Performance Optimized");
     SetTargetFPS(gameSettings.targetFPS); 
 
     int screenWidth = GetScreenWidth();
@@ -164,11 +159,12 @@ int main() {
     
     Texture2D groundTex = LoadTexture("ground.png");
     SetTextureWrap(groundTex, TEXTURE_WRAP_REPEAT); 
-    Mesh planeMesh = GenMeshPlane(1000.0f, 1000.0f, 50, 50); 
     
+    // 🔥 تم تقليل مضلعات الأرضية من 5000 إلى 2 مثلث فقط! 🔥
+    Mesh planeMesh = GenMeshPlane(1000.0f, 1000.0f, 1, 1); 
     for (int i = 0; i < planeMesh.vertexCount; i++) {
-        planeMesh.texcoords[i*2] *= 20.0f;     
-        planeMesh.texcoords[i*2 + 1] *= 20.0f; 
+        planeMesh.texcoords[i*2] *= 100.0f;     
+        planeMesh.texcoords[i*2 + 1] *= 100.0f; 
     }
     UpdateMeshBuffer(planeMesh, 1, planeMesh.texcoords, planeMesh.vertexCount * 2 * sizeof(float), 0);
     Model groundModel = LoadModelFromMesh(planeMesh);
@@ -212,27 +208,21 @@ int main() {
     Vector3 currentCameraTarget = playerPos;
     bool isFirstFrame = true;
     
-    // الأنميشن كاش (لتسريع المعالج)
     float animFrameCounter = 0.0f;
     int lastIntAnimFrame = -1; 
     int currentAnimIndex = GameAnimations::GetIndex("idle_20");
 
-    // اللمس المتعدد
     int cameraTouchId = -1;
     Vector2 lastCameraTouchPos = { -1.0f, -1.0f };
 
-    // كاش Raycast
     Vector3 lastRaycastTarget = {0};
     float cachedCamSafeDist = cameraDist;
 
-    // ==========================================
-    // حلقة اللعبة الديناميكية الآمنة (المضادة للتقطيع)
-    // ==========================================
     while (!WindowShouldClose()) {
         
-        // 🔥 حل دوامة الموت: استخدام delta وقتي محدد يمنع اللعبة من الانهيار 🔥
+        // 🔥 تم إلغاء القيد الخانق 0.05 لكي لا تعمل اللعبة كعرض بطيء 🔥
         float delta = GetFrameTime();
-        if (delta > 0.05f) delta = 0.05f; 
+        if (delta > 0.1f) delta = 0.1f; 
 
         if (isLoading) {
             loadProgress += delta * 40.0f; 
@@ -251,12 +241,9 @@ int main() {
             continue;
         }
 
-        // ------------------------------------------
-        // 1. معالجة الإدخال
-        // ------------------------------------------
         canEnterCar = false;
         CarObject* nearestCar = nullptr;
-        float minCarDistSqr = 16.0f; // مسافة الدخول للسيارة (4 متر)
+        float minCarDistSqr = 16.0f; 
         
         for (auto car : gameCars) {
             float distSqr = Vector3DistanceSqr(playerPos, car->position);
@@ -340,9 +327,6 @@ int main() {
 
         if (!hudBtns[BTN_FIRE].isPressed) isFiring = false;
 
-        // ------------------------------------------
-        // 2. تحديث الكاميرا والأنيميشن
-        // ------------------------------------------
         float dampingFactor = 1.0f - expf(-25.0f * delta);
         currentCameraYaw += atan2f(sinf(targetCameraYaw - currentCameraYaw), cosf(targetCameraYaw - currentCameraYaw)) * dampingFactor;
         currentCameraPitch += (targetCameraPitch - currentCameraPitch) * dampingFactor;
@@ -377,7 +361,6 @@ int main() {
                 if (animFrameCounter >= playerAnimations[currentAnimIndex].keyframeCount) animFrameCounter = 0.0f;
                 
                 int currentIntFrame = (int)animFrameCounter;
-                // تحديث الأنميشن فقط عند تغير الإطار الفعلي (توفير عملاق للأداء)
                 if (currentIntFrame != lastIntAnimFrame) {
                     UpdateModelAnimation(playerModel, playerAnimations[currentAnimIndex], currentIntFrame);
                     lastIntAnimFrame = currentIntFrame;
@@ -385,9 +368,6 @@ int main() {
             }
         }
 
-        // ------------------------------------------
-        // 3. تحديث الفيزياء وحركة اللاعب (بالاعتماد على الـ Delta الآمن)
-        // ------------------------------------------
         NPCSystem::Update(delta);
         CombatSystem::Update(delta);
 
@@ -448,9 +428,6 @@ int main() {
             } else isAirborne = true;
         }
 
-        // ------------------------------------------
-        // 4. الحسابات النهائية للكاميرا (كاش التصادم الذكي)
-        // ------------------------------------------
         if (!isDead && !CarEngine::isDriving) {
             Vector3 idealTargetPos = { playerPos.x, playerPos.y + 1.5f, playerPos.z };
 
@@ -470,7 +447,6 @@ int main() {
             Vector3 camDirToIdeal = Vector3Normalize(Vector3Subtract(idealCameraPos, currentCameraTarget));
             float expectedDist = Vector3Distance(idealCameraPos, currentCameraTarget);
             
-            // تحديث أشعة تصادم الكاميرا فقط إذا لزم الأمر
             if (Vector3DistanceSqr(currentCameraTarget, lastRaycastTarget) > 0.01f || isDraggingCamera) {
                 Vector3 hitPoint;
                 if (GameCollision::Raycast(currentCameraTarget, camDirToIdeal, hitPoint)) {
@@ -483,15 +459,12 @@ int main() {
             }
 
             Vector3 targetCamPos = Vector3Add(currentCameraTarget, Vector3Scale(camDirToIdeal, cachedCamSafeDist));
-            camera.position = Vector3Lerp(camera.position, targetCamPos, fminf(30.0f * delta, 1.0f));
+            camera.position = Vector3Lerp(camera.position, targetCamPos, fminf(40.0f * delta, 1.0f));
             camera.target = currentCameraTarget;
         }
 
         Vector3 camForward = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
 
-        // ==========================================
-        // 5. حلقة الرسم (Rendering Loop)
-        // ==========================================
         BeginDrawing();
         ClearBackground((Color){ 135, 206, 235, 255 }); 
 
@@ -499,15 +472,12 @@ int main() {
             
             DrawModel(groundModel, {0,0,0}, 1.0f, WHITE);
 
-            // 🔥 رسم البيوت بإقصاء آمن لمنع الاختفاء الفجائي 🔥
-            // 2500.0f تعني 50 متر. أي بيت أبعد من 50 متر سيتم إقصاؤه فقط إذا كان خارج زاوية الكاميرا.
             for (auto& h : houses) {
                 if (FastConeCulling(h.pos, camera.position, camForward, 2500.0f)) {
                     DrawModel(houseModelHigh, h.pos, 1.0f, WHITE);
                 }
             }
 
-            // رسم السيارات بمسافة أمان 20 متر
             for (auto car : gameCars) {
                 if (FastConeCulling(car->position, camera.position, camForward, 400.0f)) {
                     DrawModelEx(carModel, car->position, {0,1,0}, car->quaternion.y * (180.0f/PI), {1.2f, 1.2f, 1.2f}, WHITE);
@@ -523,7 +493,6 @@ int main() {
 
         EndMode3D();
 
-        // رسم الواجهة 2D
         if (CarEngine::isDriving) {
             CarEngine::UpdateAndDrawUI(screenWidth, screenHeight);
         } else {
@@ -551,7 +520,6 @@ int main() {
         EndDrawing();
     }
 
-    // التنظيف وإغلاق اللعبة
     if (animsCount > 0) UnloadModelAnimations(playerAnimations, animsCount);
     UnloadModel(playerModel);
     UnloadModel(houseModelHigh);
