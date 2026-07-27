@@ -124,11 +124,6 @@ void DrawHUD(int sw, int sh) {
         Rectangle dest = { btn.rect.x, btn.rect.y, btn.rect.width * btn.scale, btn.rect.height * btn.scale };
         Vector2 origin = { dest.width/2, dest.height/2 };
         
-        if (isEditMode) {
-            DrawRectangleLinesEx({dest.x - origin.x, dest.y - origin.y, dest.width, dest.height}, 2, 
-                selectedEditBtn == btn.id ? GREEN : Fade(WHITE, 0.8f));
-        }
-
         DrawTexturePro(btn.tex, {0, 0, (float)btn.tex.width, (float)btn.tex.height}, dest, origin, 0.0f, tint);
     }
 }
@@ -200,18 +195,17 @@ int main() {
     Vector3 currentCameraTarget = playerPos;
     bool isFirstFrame = true;
     
-    // متغيرات الأنميشن
+    // متغيرات الأنميشن باستخدام القاموس الذكي
     int animFrameCounter = 0;
-    int currentAnimIndex = 19; // الافتراضي: الوقوف (idle_20 -> Index 19)
-    int previousAnimIndex = 19;
+    int currentAnimIndex = GameAnimations::GetIndex("idle_20");
+    int previousAnimIndex = currentAnimIndex;
 
-    // متغيرات تتبع اللمس المتعدد
     int cameraTouchId = -1;
     Vector2 lastCameraTouchPos = { -1.0f, -1.0f };
 
     while (!WindowShouldClose()) {
         float delta = GetFrameTime();
-        if (delta > 0.1f) delta = 0.1f; 
+        if (delta > 0.1f) delta = 0.1f; // الأمان الأساسي للإطارات
 
         if (isLoading) {
             loadProgress += delta * 40.0f; 
@@ -303,7 +297,6 @@ int main() {
 
             if (hitButton) continue;
 
-            // منطقة الجويستيك (اليسار)
             if (p.x < screenWidth / 2.0f && !CarEngine::isDriving && !handledJoystick) {
                 joystickData.active = true;
                 handledJoystick = true;
@@ -314,7 +307,6 @@ int main() {
                 joystickData.x = dir.x;
                 joystickData.y = -dir.y; 
             }
-            // الكاميرا باللمس المتعدد (اليمين)
             else if (p.x >= screenWidth / 2.0f && !CarEngine::isDriving) {
                 if (cameraTouchId == -1 || cameraTouchId == i) {
                     cameraTouchId = i;
@@ -348,36 +340,36 @@ int main() {
         currentCameraPitch += (targetCameraPitch - currentCameraPitch) * dampingFactor;
 
         // ==========================================
-        // 🔥 محرك الأنميشن الذكي (Animation State Machine) 🔥
+        // 🔥 محرك الأنميشن الذكي باستخدام القاموس 🔥
         // ==========================================
         if (animsCount > 0 && !isDead) {
-            
+            std::string targetAnim = "idle_20"; 
+
             if (CarEngine::isDriving) {
-                currentAnimIndex = 7; // الأنميشن رقم 8 (drive_8) في القائمة
+                targetAnim = "drive_8";
             } 
             else if (isAirborne) {
-                currentAnimIndex = 21; // الأنميشن رقم 22 (jump_22) في القائمة
+                targetAnim = "jump_22";
             }
             else if (joystickData.active) {
-                // حالة الحركة
-                if (playerStance == "STAND") currentAnimIndex = 31; // ركض (run_32)
-                else if (playerStance == "CROUCH") currentAnimIndex = 2; // مشي قرفصاء (c_for_3)
-                else if (playerStance == "PRONE") currentAnimIndex = 26; // زحف (p_for_27)
+                if (playerStance == "STAND") targetAnim = "run_32";
+                else if (playerStance == "CROUCH") targetAnim = "c_for_3";
+                else if (playerStance == "PRONE") targetAnim = "p_for_27";
             } 
             else {
-                // حالة الثبات
-                if (playerStance == "STAND") currentAnimIndex = 19; // وقوف (idle_20)
-                else if (playerStance == "CROUCH") currentAnimIndex = 17; // ثبات قرفصاء (idle_c_18)
-                else if (playerStance == "PRONE") currentAnimIndex = 18; // ثبات انبطاح (idle_p_19)
+                if (playerStance == "STAND") targetAnim = "idle_20";
+                else if (playerStance == "CROUCH") targetAnim = "idle_c_18";
+                else if (playerStance == "PRONE") targetAnim = "idle_p_19";
             }
 
-            // إعادة تعيين الفريمات إذا تغير الأنميشن لكي لا يحدث ارتعاش
-            if (currentAnimIndex != previousAnimIndex) {
+            // استخدام القاموس لجلب الـ Index الآمن
+            int desiredAnimIndex = GameAnimations::GetIndex(targetAnim);
+
+            if (desiredAnimIndex != currentAnimIndex) {
                 animFrameCounter = 0;
-                previousAnimIndex = currentAnimIndex;
+                currentAnimIndex = desiredAnimIndex;
             }
 
-            // حماية لتجنب الأعطال (Index Out of Bounds)
             if (currentAnimIndex < animsCount) {
                 animFrameCounter++;
                 if (animFrameCounter >= playerAnimations[currentAnimIndex].keyframeCount) {
@@ -446,9 +438,26 @@ int main() {
                 isAirborne = true;
             }
 
+            // ==========================================
+            // 🔥 إصلاح الانفجار الرياضي (طيران الكاميرا) 🔥
+            // ==========================================
             Vector3 idealTargetPos = { playerPos.x, playerPos.y + 1.5f, playerPos.z };
-            if (isFirstFrame) { currentCameraTarget = idealTargetPos; isFirstFrame = false; } 
-            else { currentCameraTarget = Vector3Lerp(currentCameraTarget, idealTargetPos, 20.0f * delta); }
+
+            if (isFirstFrame) {
+                // وضع الكاميرا فوراً في الفريم الأول بدون Lerp
+                currentCameraTarget = idealTargetPos;
+                camera.position = { 
+                    currentCameraTarget.x + cameraDist * sinf(currentCameraYaw) * cosf(currentCameraPitch), 
+                    currentCameraTarget.y + cameraDist * sinf(currentCameraPitch), 
+                    currentCameraTarget.z + cameraDist * cosf(currentCameraYaw) * cosf(currentCameraPitch) 
+                };
+                camera.target = currentCameraTarget;
+                isFirstFrame = false;
+                continue; // تخطي باقي حسابات الكاميرا لهذا الفريم
+            } else {
+                // قفل الأمان fminf لمنع تجاوز الرقم 1.0
+                currentCameraTarget = Vector3Lerp(currentCameraTarget, idealTargetPos, fminf(20.0f * delta, 1.0f)); 
+            }
 
             Vector3 idealCameraPos = { 
                 currentCameraTarget.x + cameraDist * sinf(currentCameraYaw) * cosf(currentCameraPitch), 
@@ -469,7 +478,8 @@ int main() {
                 }
             }
 
-            camera.position = Vector3Lerp(camera.position, targetCamPos, 30.0f * delta);
+            // قفل الأمان fminf الثاني للكاميرا
+            camera.position = Vector3Lerp(camera.position, targetCamPos, fminf(30.0f * delta, 1.0f));
             camera.target = currentCameraTarget;
         }
 
@@ -492,7 +502,6 @@ int main() {
                 DrawModelEx(carModel, car->position, {0,1,0}, car->quaternion.y * (180.0f/PI), {1.2f, 1.2f, 1.2f}, WHITE);
             }
 
-            // رسم اللاعب بالأنيميشن الذكي (عدا إن كان يقود السيارة فيختفي ليركبها)
             if (!isScoped && !isDead && !CarEngine::isDriving) {
                 DrawModelEx(playerModel, playerPos, {0,1,0}, playerVisualRotation, {0.015f, 0.015f, 0.015f}, WHITE);
             }
