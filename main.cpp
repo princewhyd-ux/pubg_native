@@ -179,6 +179,8 @@ int main() {
     // تجهيز موديلات LOD للبيوت (كمثال للهيكلية)
     Model houseModelHigh = LoadModel("house.glb");
     
+    Model carModel = LoadModel("car2.glb");
+    
     struct HouseInst { Vector3 pos; };
     std::vector<HouseInst> houses = {
         {{10, 0, -15}}, {{30, 0, -40}}, {{20, 0, 20}}, {{-20, 0, -20}}
