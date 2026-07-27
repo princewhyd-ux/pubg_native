@@ -30,8 +30,7 @@ float playerVisualRotation = 0.0f;
 extern int totalAlivePlayers; 
 extern int myKillCount;       
 
-// 🔥 (إصلاح خطأ الربط Linker Error) 
-// إعادة حجز الذاكرة للمتغيرات التي تستخدمها الملفات الأخرى (npc.cpp و driving.cpp)
+// إعادة حجز الذاكرة لمنع أخطاء الـ Linker
 struct EnvironmentObject {
     Vector3 position;
     BoundingBox bounds;
@@ -67,7 +66,7 @@ struct JoystickData {
 struct EngineSettings {
     float cameraSens = 0.005f;
     float cameraSensScoped = 0.002f;
-    int targetFPS = 120; // دعم شاشات 120Hz
+    int targetFPS = 60; // 60 إطار هو الأكثر استقراراً للهواتف لمنع الحرارة
 } gameSettings;
 
 enum BtnType { BTN_FIRE, BTN_SCOPE, BTN_JUMP, BTN_CROUCH, BTN_PRONE, BTN_ENTER, BTN_COUNT };
@@ -81,21 +80,18 @@ struct HUDElement {
 HUDElement hudBtns[BTN_COUNT];
 
 // ==========================================
-// أنظمة الإقصاء السريعة (Culling & LOD)
+// 🔥 أنظمة الإقصاء السريعة (النسخة الآمنة للموبايل)
 // ==========================================
-enum LODLevel { LOD_HIGH, LOD_MED, LOD_LOW, LOD_HIDDEN };
 
-inline LODLevel GetLODLevel(float distSqr) {
-    if (distSqr < 3600.0f)  return LOD_HIGH;  // أقل من 60 متر
-    if (distSqr < 14400.0f) return LOD_MED;   // بين 60 و 120 متر
-    if (distSqr < 40000.0f) return LOD_LOW;   // بين 120 و 200 متر
-    return LOD_HIDDEN;                        // أبعد من 200 متر لا يُرسم
-}
-
-// Cone Culling سريع بديل للـ Frustum المعقد للعمليات السريعة
-inline bool FastConeCulling(Vector3 pos, Vector3 camPos, Vector3 camForward, float radiusSqr) {
+// دالة الإقصاء البصري المحسنة (Cone Culling with Safe Radius)
+inline bool FastConeCulling(Vector3 pos, Vector3 camPos, Vector3 camForward, float safeRadiusSqr) {
+    // 1. إذا كان المجسم ضمن مسافة الأمان (مثلاً 50 متر للبيوت)، ارسمه دائماً ولا تخفيه أبداً!
+    if (Vector3DistanceSqr(pos, camPos) < safeRadiusSqr) return true;
+    
+    // 2. إذا كان أبعد من مسافة الأمان، افحص ما إذا كان يقع أمام الكاميرا
     Vector3 dirToObj = Vector3Normalize(Vector3Subtract(pos, camPos));
-    return Vector3DotProduct(dirToObj, camForward) > 0.4f; // ~66 degrees field of view
+    // 0.2f تعني زاوية رؤية أوسع قليلاً لتجنب اختفاء الحواف
+    return Vector3DotProduct(dirToObj, camForward) > 0.2f; 
 }
 
 // ==========================================
@@ -150,7 +146,7 @@ void DrawHUD(int sw, int sh) {
 // ==========================================
 int main() {
     SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_WINDOW_HIGHDPI | FLAG_FULLSCREEN_MODE);
-    InitWindow(0, 0, "PUBG Mobile Native - AAA Architecture");
+    InitWindow(0, 0, "PUBG Mobile Native - Optimized");
     SetTargetFPS(gameSettings.targetFPS); 
 
     int screenWidth = GetScreenWidth();
@@ -216,7 +212,7 @@ int main() {
     Vector3 currentCameraTarget = playerPos;
     bool isFirstFrame = true;
     
-    // الأنميشن
+    // الأنميشن كاش (لتسريع المعالج)
     float animFrameCounter = 0.0f;
     int lastIntAnimFrame = -1; 
     int currentAnimIndex = GameAnimations::GetIndex("idle_20");
@@ -229,21 +225,17 @@ int main() {
     Vector3 lastRaycastTarget = {0};
     float cachedCamSafeDist = cameraDist;
 
-    // 🔥 نظام الفيزياء الثابت (Fixed Timestep Accumulator)
-    const float FIXED_DT = 1.0f / 60.0f; 
-    float physicsAccumulator = 0.0f;
-
     // ==========================================
-    // حلقة اللعبة المستقلة تماماً عن الرسوميات
+    // حلقة اللعبة الديناميكية الآمنة (المضادة للتقطيع)
     // ==========================================
     while (!WindowShouldClose()) {
-        float frameTime = GetFrameTime();
-        if (frameTime > 0.05f) frameTime = 0.05f; 
         
-        physicsAccumulator += frameTime;
+        // 🔥 حل دوامة الموت: استخدام delta وقتي محدد يمنع اللعبة من الانهيار 🔥
+        float delta = GetFrameTime();
+        if (delta > 0.05f) delta = 0.05f; 
 
         if (isLoading) {
-            loadProgress += frameTime * 40.0f; 
+            loadProgress += delta * 40.0f; 
             if (loadProgress >= 100.0f) {
                 loadProgress = 100.0f;
                 if (GetTime() - startTime > 2.5) isLoading = false;
@@ -260,11 +252,11 @@ int main() {
         }
 
         // ------------------------------------------
-        // 1. معالجة الإدخال (Input Handling)
+        // 1. معالجة الإدخال
         // ------------------------------------------
         canEnterCar = false;
         CarObject* nearestCar = nullptr;
-        float minCarDistSqr = 16.0f; 
+        float minCarDistSqr = 16.0f; // مسافة الدخول للسيارة (4 متر)
         
         for (auto car : gameCars) {
             float distSqr = Vector3DistanceSqr(playerPos, car->position);
@@ -349,9 +341,9 @@ int main() {
         if (!hudBtns[BTN_FIRE].isPressed) isFiring = false;
 
         // ------------------------------------------
-        // 2. تحديث الكاميرا والأنيميشن (تعمل كل فريم للسلاسة)
+        // 2. تحديث الكاميرا والأنيميشن
         // ------------------------------------------
-        float dampingFactor = 1.0f - expf(-25.0f * frameTime);
+        float dampingFactor = 1.0f - expf(-25.0f * delta);
         currentCameraYaw += atan2f(sinf(targetCameraYaw - currentCameraYaw), cosf(targetCameraYaw - currentCameraYaw)) * dampingFactor;
         currentCameraPitch += (targetCameraPitch - currentCameraPitch) * dampingFactor;
 
@@ -381,10 +373,11 @@ int main() {
             }
 
             if (currentAnimIndex < animsCount) {
-                animFrameCounter += 30.0f * frameTime * currentAnimSpeed; 
+                animFrameCounter += 30.0f * delta * currentAnimSpeed; 
                 if (animFrameCounter >= playerAnimations[currentAnimIndex].keyframeCount) animFrameCounter = 0.0f;
                 
                 int currentIntFrame = (int)animFrameCounter;
+                // تحديث الأنميشن فقط عند تغير الإطار الفعلي (توفير عملاق للأداء)
                 if (currentIntFrame != lastIntAnimFrame) {
                     UpdateModelAnimation(playerModel, playerAnimations[currentAnimIndex], currentIntFrame);
                     lastIntAnimFrame = currentIntFrame;
@@ -393,73 +386,70 @@ int main() {
         }
 
         // ------------------------------------------
-        // 3. تحديث الفيزياء (Fixed Timestep Loop)
+        // 3. تحديث الفيزياء وحركة اللاعب (بالاعتماد على الـ Delta الآمن)
         // ------------------------------------------
-        while (physicsAccumulator >= FIXED_DT) {
-            NPCSystem::Update(FIXED_DT);
-            CombatSystem::Update(FIXED_DT);
+        NPCSystem::Update(delta);
+        CombatSystem::Update(delta);
 
-            if (CarEngine::isDriving) {
-                CarEngine::Update(FIXED_DT);
-            } 
-            else if (!isDead) {
-                playerVelocity.y -= 25.0f * FIXED_DT; 
-                Vector3 forwardVector = { -sinf(currentCameraYaw), 0.0f, -cosf(currentCameraYaw) };
-                Vector3 rightVector = { cosf(currentCameraYaw), 0.0f, -sinf(currentCameraYaw) };
+        if (CarEngine::isDriving) {
+            CarEngine::Update(delta);
+        } 
+        else if (!isDead) {
+            playerVelocity.y -= 25.0f * delta; 
+            Vector3 forwardVector = { -sinf(currentCameraYaw), 0.0f, -cosf(currentCameraYaw) };
+            Vector3 rightVector = { cosf(currentCameraYaw), 0.0f, -sinf(currentCameraYaw) };
 
-                float targetSpeedX = 0.0f;
-                float targetSpeedZ = 0.0f;
+            float targetSpeedX = 0.0f;
+            float targetSpeedZ = 0.0f;
 
-                if (joystickData.active && !isTransitioning) {
-                    float strength = fminf(joystickData.distance / 80.0f, 1.0f);
-                    float speedMod = (currentStance == STANCE_PRONE) ? 0.2f : ((currentStance == STANCE_CROUCH) ? 0.4f : 1.0f);
-                    float currentSpeed = Lerp(playerSettings.walkSpeed, playerSettings.runSpeed, strength) * speedMod;
+            if (joystickData.active && !isTransitioning) {
+                float strength = fminf(joystickData.distance / 80.0f, 1.0f);
+                float speedMod = (currentStance == STANCE_PRONE) ? 0.2f : ((currentStance == STANCE_CROUCH) ? 0.4f : 1.0f);
+                float currentSpeed = Lerp(playerSettings.walkSpeed, playerSettings.runSpeed, strength) * speedMod;
 
-                    Vector3 moveVector = { 
-                        (forwardVector.x * joystickData.y) + (rightVector.x * joystickData.x), 0.0f,
-                        (forwardVector.z * joystickData.y) + (rightVector.z * joystickData.x)
-                    };
+                Vector3 moveVector = { 
+                    (forwardVector.x * joystickData.y) + (rightVector.x * joystickData.x), 0.0f,
+                    (forwardVector.z * joystickData.y) + (rightVector.z * joystickData.x)
+                };
 
-                    if (Vector3LengthSqr(moveVector) > 0.01f) {
-                        moveVector = Vector3Normalize(moveVector);
-                        targetSpeedX = moveVector.x * currentSpeed;
-                        targetSpeedZ = moveVector.z * currentSpeed;
-        
-                        float targetPlayerRot = atan2f(moveVector.x, moveVector.z) * (180.0f / PI);
-                        float angleDiff = targetPlayerRot - playerVisualRotation;
-                        while (angleDiff < -180.0f) angleDiff += 360.0f;
-                        while (angleDiff > 180.0f) angleDiff -= 360.0f;
-                        playerVisualRotation += angleDiff * playerSettings.rotationSpeed * FIXED_DT;
-                    }
+                if (Vector3LengthSqr(moveVector) > 0.01f) {
+                    moveVector = Vector3Normalize(moveVector);
+                    targetSpeedX = moveVector.x * currentSpeed;
+                    targetSpeedZ = moveVector.z * currentSpeed;
+    
+                    float targetPlayerRot = atan2f(moveVector.x, moveVector.z) * (180.0f / PI);
+                    float angleDiff = targetPlayerRot - playerVisualRotation;
+                    while (angleDiff < -180.0f) angleDiff += 360.0f;
+                    while (angleDiff > 180.0f) angleDiff -= 360.0f;
+                    playerVisualRotation += angleDiff * playerSettings.rotationSpeed * delta;
                 }
-
-                playerVelocity.x = Lerp(playerVelocity.x, targetSpeedX, 12.0f * FIXED_DT);
-                playerVelocity.z = Lerp(playerVelocity.z, targetSpeedZ, 12.0f * FIXED_DT);
-
-                const float pWidth = 1.0f; const float pLength = 2.4f;
-                for (auto car : gameCars) {
-                    Vector3 localPos = Vector3Subtract(playerPos, car->position); 
-                    if (fabs(localPos.x) < pWidth && fabs(localPos.z) < pLength && localPos.y > -1 && localPos.y < 2) {
-                        float pushX = pWidth - fabs(localPos.x);
-                        float pushZ = pLength - fabs(localPos.z);
-                        if (pushX < pushZ) playerPos.x += (localPos.x > 0 ? pushX : -pushX);
-                        else playerPos.z += (localPos.z > 0 ? pushZ : -pushZ);
-                    }
-                }
-
-                GameCollision::ResolveMovement(playerPos, playerVelocity, FIXED_DT);
-
-                if (playerPos.y <= 0.0f) {
-                    playerPos.y = 0.0f;
-                    if (playerVelocity.y < 0) playerVelocity.y = 0;
-                    isAirborne = false;
-                } else isAirborne = true;
             }
-            physicsAccumulator -= FIXED_DT;
+
+            playerVelocity.x = Lerp(playerVelocity.x, targetSpeedX, 12.0f * delta);
+            playerVelocity.z = Lerp(playerVelocity.z, targetSpeedZ, 12.0f * delta);
+
+            const float pWidth = 1.0f; const float pLength = 2.4f;
+            for (auto car : gameCars) {
+                Vector3 localPos = Vector3Subtract(playerPos, car->position); 
+                if (fabs(localPos.x) < pWidth && fabs(localPos.z) < pLength && localPos.y > -1 && localPos.y < 2) {
+                    float pushX = pWidth - fabs(localPos.x);
+                    float pushZ = pLength - fabs(localPos.z);
+                    if (pushX < pushZ) playerPos.x += (localPos.x > 0 ? pushX : -pushX);
+                    else playerPos.z += (localPos.z > 0 ? pushZ : -pushZ);
+                }
+            }
+
+            GameCollision::ResolveMovement(playerPos, playerVelocity, delta);
+
+            if (playerPos.y <= 0.0f) {
+                playerPos.y = 0.0f;
+                if (playerVelocity.y < 0) playerVelocity.y = 0;
+                isAirborne = false;
+            } else isAirborne = true;
         }
 
         // ------------------------------------------
-        // 4. الحسابات النهائية للكاميرا
+        // 4. الحسابات النهائية للكاميرا (كاش التصادم الذكي)
         // ------------------------------------------
         if (!isDead && !CarEngine::isDriving) {
             Vector3 idealTargetPos = { playerPos.x, playerPos.y + 1.5f, playerPos.z };
@@ -468,7 +458,7 @@ int main() {
                 currentCameraTarget = idealTargetPos;
                 isFirstFrame = false;
             } else {
-                currentCameraTarget = Vector3Lerp(currentCameraTarget, idealTargetPos, fminf(20.0f * frameTime, 1.0f)); 
+                currentCameraTarget = Vector3Lerp(currentCameraTarget, idealTargetPos, fminf(20.0f * delta, 1.0f)); 
             }
 
             Vector3 idealCameraPos = { 
@@ -480,6 +470,7 @@ int main() {
             Vector3 camDirToIdeal = Vector3Normalize(Vector3Subtract(idealCameraPos, currentCameraTarget));
             float expectedDist = Vector3Distance(idealCameraPos, currentCameraTarget);
             
+            // تحديث أشعة تصادم الكاميرا فقط إذا لزم الأمر
             if (Vector3DistanceSqr(currentCameraTarget, lastRaycastTarget) > 0.01f || isDraggingCamera) {
                 Vector3 hitPoint;
                 if (GameCollision::Raycast(currentCameraTarget, camDirToIdeal, hitPoint)) {
@@ -492,14 +483,14 @@ int main() {
             }
 
             Vector3 targetCamPos = Vector3Add(currentCameraTarget, Vector3Scale(camDirToIdeal, cachedCamSafeDist));
-            camera.position = Vector3Lerp(camera.position, targetCamPos, fminf(30.0f * frameTime, 1.0f));
+            camera.position = Vector3Lerp(camera.position, targetCamPos, fminf(30.0f * delta, 1.0f));
             camera.target = currentCameraTarget;
         }
 
         Vector3 camForward = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
 
         // ==========================================
-        // 5. حلقة الرسم المطلقة
+        // 5. حلقة الرسم (Rendering Loop)
         // ==========================================
         BeginDrawing();
         ClearBackground((Color){ 135, 206, 235, 255 }); 
@@ -508,18 +499,17 @@ int main() {
             
             DrawModel(groundModel, {0,0,0}, 1.0f, WHITE);
 
+            // 🔥 رسم البيوت بإقصاء آمن لمنع الاختفاء الفجائي 🔥
+            // 2500.0f تعني 50 متر. أي بيت أبعد من 50 متر سيتم إقصاؤه فقط إذا كان خارج زاوية الكاميرا.
             for (auto& h : houses) {
-                float distSqr = Vector3DistanceSqr(h.pos, camera.position);
-                LODLevel lod = GetLODLevel(distSqr);
-                
-                if (lod != LOD_HIDDEN && FastConeCulling(h.pos, camera.position, camForward, 400.0f)) {
+                if (FastConeCulling(h.pos, camera.position, camForward, 2500.0f)) {
                     DrawModel(houseModelHigh, h.pos, 1.0f, WHITE);
                 }
             }
 
+            // رسم السيارات بمسافة أمان 20 متر
             for (auto car : gameCars) {
-                float distSqr = Vector3DistanceSqr(car->position, camera.position);
-                if (GetLODLevel(distSqr) != LOD_HIDDEN && FastConeCulling(car->position, camera.position, camForward, 100.0f)) {
+                if (FastConeCulling(car->position, camera.position, camForward, 400.0f)) {
                     DrawModelEx(carModel, car->position, {0,1,0}, car->quaternion.y * (180.0f/PI), {1.2f, 1.2f, 1.2f}, WHITE);
                 }
             }
@@ -533,6 +523,7 @@ int main() {
 
         EndMode3D();
 
+        // رسم الواجهة 2D
         if (CarEngine::isDriving) {
             CarEngine::UpdateAndDrawUI(screenWidth, screenHeight);
         } else {
@@ -560,6 +551,7 @@ int main() {
         EndDrawing();
     }
 
+    // التنظيف وإغلاق اللعبة
     if (animsCount > 0) UnloadModelAnimations(playerAnimations, animsCount);
     UnloadModel(playerModel);
     UnloadModel(houseModelHigh);
