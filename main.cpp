@@ -41,17 +41,17 @@ const float cameraDist = 1.8f;
 bool isAirborne = false;
 bool isFiring = false;
 bool isScoped = false;
-std::string playerStance = "STAND"; // STAND, CROUCH, PRONE
+std::string playerStance = "STAND"; 
 bool isTransitioning = false;
 bool isEditMode = false;
 bool settingsOpen = false;
 bool canEnterCar = false; 
 
-// 🔥 تسريع اللاعب استجابة لطلبك 🔥
+// 🔥 إعدادات السلاسة الجديدة للاعب 🔥
 struct PlayerSettings {
-    float walkSpeed = 9.0f;      // كان 4.2
-    float runSpeed = 18.0f;      // كان 8.5
-    float rotationSpeed = 20.0f; // كان 15 ليكون التفاف اللاعب أسرع
+    float walkSpeed = 6.0f;      // تم ضبطها لتبدو واقعية
+    float runSpeed = 12.0f;      // سرعة الركض
+    float rotationSpeed = 8.0f;  // تم تخفيضها من 20 لكي يلتف اللاعب بنعومة فائقة
 } playerSettings;
 
 struct JoystickData {
@@ -153,9 +153,11 @@ int main() {
     Texture2D groundTex = LoadTexture("ground.png");
     SetTextureWrap(groundTex, TEXTURE_WRAP_REPEAT); 
     Mesh planeMesh = GenMeshPlane(1000.0f, 1000.0f, 50, 50); 
+    
+    // 🔥 حل مشكلة الأرضية السوداء (تقليل التكرار ليتناسب مع كرت شاشة الموبايل) 🔥
     for (int i = 0; i < planeMesh.vertexCount; i++) {
-        planeMesh.texcoords[i*2] *= 100.0f;     
-        planeMesh.texcoords[i*2 + 1] *= 100.0f; 
+        planeMesh.texcoords[i*2] *= 20.0f;     
+        planeMesh.texcoords[i*2 + 1] *= 20.0f; 
     }
     UpdateMeshBuffer(planeMesh, 1, planeMesh.texcoords, planeMesh.vertexCount * 2 * sizeof(float), 0);
     Model groundModel = LoadModelFromMesh(planeMesh);
@@ -196,7 +198,6 @@ int main() {
     Vector3 currentCameraTarget = playerPos;
     bool isFirstFrame = true;
     
-    // 🔥 تحويل عداد الأنميشن إلى Float لربطه بالوقت وجعله سريعاً جداً 🔥
     float animFrameCounter = 0.0f;
     int currentAnimIndex = GameAnimations::GetIndex("idle_20");
     int previousAnimIndex = currentAnimIndex;
@@ -341,11 +342,11 @@ int main() {
         currentCameraPitch += (targetCameraPitch - currentCameraPitch) * dampingFactor;
 
         // ==========================================
-        // 🔥 محرك الأنميشن السريع المرتبط بالوقت (Delta Time) 🔥
+        // 🔥 محرك الأنميشن المثالي (بدون تقطيع 30 FPS) 🔥
         // ==========================================
         if (animsCount > 0 && !isDead) {
             std::string targetAnim = "idle_20"; 
-            float currentAnimSpeed = 1.0f; // سرعة الأنميشن الافتراضية
+            float currentAnimSpeed = 1.0f; 
 
             if (CarEngine::isDriving) {
                 targetAnim = "drive_8";
@@ -354,9 +355,9 @@ int main() {
                 targetAnim = "jump_22";
             }
             else if (joystickData.active) {
-                if (playerStance == "STAND") { targetAnim = "run_32"; currentAnimSpeed = 2.0f; } // مضاعفة سرعة حركة الأقدام
-                else if (playerStance == "CROUCH") { targetAnim = "c_for_3"; currentAnimSpeed = 1.5f; }
-                else if (playerStance == "PRONE") { targetAnim = "p_for_27"; currentAnimSpeed = 1.5f; }
+                if (playerStance == "STAND") { targetAnim = "run_32"; currentAnimSpeed = 1.2f; } 
+                else if (playerStance == "CROUCH") { targetAnim = "c_for_3"; currentAnimSpeed = 1.0f; }
+                else if (playerStance == "PRONE") { targetAnim = "p_for_27"; currentAnimSpeed = 1.0f; }
             } 
             else {
                 if (playerStance == "STAND") targetAnim = "idle_20";
@@ -372,8 +373,8 @@ int main() {
             }
 
             if (currentAnimIndex < animsCount) {
-                // بدلاً من animFrameCounter++ المعتمدة على الهاتف، نعتمد على الوقت الحقيقي
-                animFrameCounter += 60.0f * delta * currentAnimSpeed; 
+                // استخدام 30 فريم بالثانية كقاعدة للأنميشن بدلاً من 60 لكي لا يحدث تقطيع وتشوه للشبكة
+                animFrameCounter += 30.0f * delta * currentAnimSpeed; 
                 
                 if (animFrameCounter >= playerAnimations[currentAnimIndex].keyframeCount) {
                     animFrameCounter = 0.0f;
@@ -391,6 +392,10 @@ int main() {
             Vector3 forwardVector = { -sinf(currentCameraYaw), 0.0f, -cosf(currentCameraYaw) };
             Vector3 rightVector = { cosf(currentCameraYaw), 0.0f, -sinf(currentCameraYaw) };
 
+            // 🔥 تنعيم الانطلاق والتوقف للاعب 🔥
+            float targetSpeedX = 0.0f;
+            float targetSpeedZ = 0.0f;
+
             if (joystickData.active && !isTransitioning) {
                 float strength = fminf(joystickData.distance / 80.0f, 1.0f);
                 float speedMod = (playerStance == "PRONE") ? 0.2f : ((playerStance == "CROUCH") ? 0.4f : 1.0f);
@@ -404,21 +409,22 @@ int main() {
 
                 if (Vector3LengthSqr(moveVector) > 0.01f) {
                     moveVector = Vector3Normalize(moveVector);
-                    playerVelocity.x = moveVector.x * currentSpeed;
-                    playerVelocity.z = moveVector.z * currentSpeed;
+                    targetSpeedX = moveVector.x * currentSpeed;
+                    targetSpeedZ = moveVector.z * currentSpeed;
     
                     float targetPlayerRot = atan2f(moveVector.x, moveVector.z) * (180.0f / PI);
                     float angleDiff = targetPlayerRot - playerVisualRotation;
                     while (angleDiff < -180.0f) angleDiff += 360.0f;
                     while (angleDiff > 180.0f) angleDiff -= 360.0f;
+                    
+                    // الدوران السلس
                     playerVisualRotation += angleDiff * playerSettings.rotationSpeed * delta;
-              
-                } else {
-                    playerVelocity.x = 0; playerVelocity.z = 0;
                 }
-            } else {
-                playerVelocity.x = 0; playerVelocity.z = 0;
             }
+
+            // تطبيق السلاسة (Lerp) على السرعة لتجنب القفزات
+            playerVelocity.x = Lerp(playerVelocity.x, targetSpeedX, 12.0f * delta);
+            playerVelocity.z = Lerp(playerVelocity.z, targetSpeedZ, 12.0f * delta);
 
             const float pWidth = 1.0f; const float pLength = 2.4f;
             for (auto car : gameCars) {
