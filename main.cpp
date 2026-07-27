@@ -30,7 +30,14 @@ float playerVisualRotation = 0.0f;
 extern int totalAlivePlayers; 
 extern int myKillCount;       
 
-extern std::vector<CarObject*> gameCars;
+// 🔥 (إصلاح خطأ الربط Linker Error) 
+// إعادة حجز الذاكرة للمتغيرات التي تستخدمها الملفات الأخرى (npc.cpp و driving.cpp)
+struct EnvironmentObject {
+    Vector3 position;
+    BoundingBox bounds;
+};
+std::vector<EnvironmentObject> environmentObjects;
+std::vector<CarObject*> gameCars;
 
 const float cameraDist = 1.8f;
 bool isAirborne = false;
@@ -74,7 +81,7 @@ struct HUDElement {
 HUDElement hudBtns[BTN_COUNT];
 
 // ==========================================
-// 🔥 أنظمة الإقصاء السريعة (Culling & LOD)
+// أنظمة الإقصاء السريعة (Culling & LOD)
 // ==========================================
 enum LODLevel { LOD_HIGH, LOD_MED, LOD_LOW, LOD_HIDDEN };
 
@@ -144,7 +151,7 @@ void DrawHUD(int sw, int sh) {
 int main() {
     SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_WINDOW_HIGHDPI | FLAG_FULLSCREEN_MODE);
     InitWindow(0, 0, "PUBG Mobile Native - AAA Architecture");
-    SetTargetFPS(gameSettings.targetFPS); // دعم الإطارات العالية حسب الإعدادات
+    SetTargetFPS(gameSettings.targetFPS); 
 
     int screenWidth = GetScreenWidth();
     int screenHeight = GetScreenHeight();
@@ -176,9 +183,7 @@ int main() {
     int animsCount = 0;
     ModelAnimation* playerAnimations = LoadModelAnimations("player.glb", &animsCount);
 
-    // تجهيز موديلات LOD للبيوت (كمثال للهيكلية)
     Model houseModelHigh = LoadModel("house.glb");
-    
     Model carModel = LoadModel("car2.glb");
     
     struct HouseInst { Vector3 pos; };
@@ -431,7 +436,6 @@ int main() {
                 playerVelocity.x = Lerp(playerVelocity.x, targetSpeedX, 12.0f * FIXED_DT);
                 playerVelocity.z = Lerp(playerVelocity.z, targetSpeedZ, 12.0f * FIXED_DT);
 
-                // حلول التصادم للفيزياء
                 const float pWidth = 1.0f; const float pLength = 2.4f;
                 for (auto car : gameCars) {
                     Vector3 localPos = Vector3Subtract(playerPos, car->position); 
@@ -452,10 +456,10 @@ int main() {
                 } else isAirborne = true;
             }
             physicsAccumulator -= FIXED_DT;
-        } // نهاية حلقة الفيزياء
+        }
 
         // ------------------------------------------
-        // 4. الحسابات النهائية للكاميرا (بعد الفيزياء وقبل الرسم)
+        // 4. الحسابات النهائية للكاميرا
         // ------------------------------------------
         if (!isDead && !CarEngine::isDriving) {
             Vector3 idealTargetPos = { playerPos.x, playerPos.y + 1.5f, playerPos.z };
@@ -476,7 +480,6 @@ int main() {
             Vector3 camDirToIdeal = Vector3Normalize(Vector3Subtract(idealCameraPos, currentCameraTarget));
             float expectedDist = Vector3Distance(idealCameraPos, currentCameraTarget);
             
-            // 🔥 Raycast Caching: تفادي حساب الأشعة إلا للضرورة 🔥
             if (Vector3DistanceSqr(currentCameraTarget, lastRaycastTarget) > 0.01f || isDraggingCamera) {
                 Vector3 hitPoint;
                 if (GameCollision::Raycast(currentCameraTarget, camDirToIdeal, hitPoint)) {
@@ -496,7 +499,7 @@ int main() {
         Vector3 camForward = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
 
         // ==========================================
-        // 5. حلقة الرسم المطلقة (لا توضع داخل شروط اللوجيك أبدأ!)
+        // 5. حلقة الرسم المطلقة
         // ==========================================
         BeginDrawing();
         ClearBackground((Color){ 135, 206, 235, 255 }); 
@@ -505,14 +508,11 @@ int main() {
             
             DrawModel(groundModel, {0,0,0}, 1.0f, WHITE);
 
-            // 🔥 نظام LOD و Culling احترافي 🔥
             for (auto& h : houses) {
                 float distSqr = Vector3DistanceSqr(h.pos, camera.position);
                 LODLevel lod = GetLODLevel(distSqr);
                 
                 if (lod != LOD_HIDDEN && FastConeCulling(h.pos, camera.position, camForward, 400.0f)) {
-                    // هنا مستقبلاً تضع (houseModelMed أو houseModelLow)
-                    // ولمحرك حقيقي يتم استدعاء DrawMeshInstanced 
                     DrawModel(houseModelHigh, h.pos, 1.0f, WHITE);
                 }
             }
@@ -533,7 +533,6 @@ int main() {
 
         EndMode3D();
 
-        // رسم الواجهة 2D
         if (CarEngine::isDriving) {
             CarEngine::UpdateAndDrawUI(screenWidth, screenHeight);
         } else {
@@ -561,7 +560,6 @@ int main() {
         EndDrawing();
     }
 
-    // التنظيف وإغلاق اللعبة
     if (animsCount > 0) UnloadModelAnimations(playerAnimations, animsCount);
     UnloadModel(playerModel);
     UnloadModel(houseModelHigh);
