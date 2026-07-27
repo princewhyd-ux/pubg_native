@@ -47,10 +47,11 @@ bool isEditMode = false;
 bool settingsOpen = false;
 bool canEnterCar = false; 
 
+// 🔥 تسريع اللاعب استجابة لطلبك 🔥
 struct PlayerSettings {
-    float walkSpeed = 4.2f;
-    float runSpeed = 8.5f;
-    float rotationSpeed = 15.0f;
+    float walkSpeed = 9.0f;      // كان 4.2
+    float runSpeed = 18.0f;      // كان 8.5
+    float rotationSpeed = 20.0f; // كان 15 ليكون التفاف اللاعب أسرع
 } playerSettings;
 
 struct JoystickData {
@@ -195,8 +196,8 @@ int main() {
     Vector3 currentCameraTarget = playerPos;
     bool isFirstFrame = true;
     
-    // متغيرات الأنميشن باستخدام القاموس الذكي
-    int animFrameCounter = 0;
+    // 🔥 تحويل عداد الأنميشن إلى Float لربطه بالوقت وجعله سريعاً جداً 🔥
+    float animFrameCounter = 0.0f;
     int currentAnimIndex = GameAnimations::GetIndex("idle_20");
     int previousAnimIndex = currentAnimIndex;
 
@@ -205,7 +206,7 @@ int main() {
 
     while (!WindowShouldClose()) {
         float delta = GetFrameTime();
-        if (delta > 0.1f) delta = 0.1f; // الأمان الأساسي للإطارات
+        if (delta > 0.1f) delta = 0.1f; 
 
         if (isLoading) {
             loadProgress += delta * 40.0f; 
@@ -340,10 +341,11 @@ int main() {
         currentCameraPitch += (targetCameraPitch - currentCameraPitch) * dampingFactor;
 
         // ==========================================
-        // 🔥 محرك الأنميشن الذكي باستخدام القاموس 🔥
+        // 🔥 محرك الأنميشن السريع المرتبط بالوقت (Delta Time) 🔥
         // ==========================================
         if (animsCount > 0 && !isDead) {
             std::string targetAnim = "idle_20"; 
+            float currentAnimSpeed = 1.0f; // سرعة الأنميشن الافتراضية
 
             if (CarEngine::isDriving) {
                 targetAnim = "drive_8";
@@ -352,9 +354,9 @@ int main() {
                 targetAnim = "jump_22";
             }
             else if (joystickData.active) {
-                if (playerStance == "STAND") targetAnim = "run_32";
-                else if (playerStance == "CROUCH") targetAnim = "c_for_3";
-                else if (playerStance == "PRONE") targetAnim = "p_for_27";
+                if (playerStance == "STAND") { targetAnim = "run_32"; currentAnimSpeed = 2.0f; } // مضاعفة سرعة حركة الأقدام
+                else if (playerStance == "CROUCH") { targetAnim = "c_for_3"; currentAnimSpeed = 1.5f; }
+                else if (playerStance == "PRONE") { targetAnim = "p_for_27"; currentAnimSpeed = 1.5f; }
             } 
             else {
                 if (playerStance == "STAND") targetAnim = "idle_20";
@@ -362,20 +364,21 @@ int main() {
                 else if (playerStance == "PRONE") targetAnim = "idle_p_19";
             }
 
-            // استخدام القاموس لجلب الـ Index الآمن
             int desiredAnimIndex = GameAnimations::GetIndex(targetAnim);
 
             if (desiredAnimIndex != currentAnimIndex) {
-                animFrameCounter = 0;
+                animFrameCounter = 0.0f;
                 currentAnimIndex = desiredAnimIndex;
             }
 
             if (currentAnimIndex < animsCount) {
-                animFrameCounter++;
+                // بدلاً من animFrameCounter++ المعتمدة على الهاتف، نعتمد على الوقت الحقيقي
+                animFrameCounter += 60.0f * delta * currentAnimSpeed; 
+                
                 if (animFrameCounter >= playerAnimations[currentAnimIndex].keyframeCount) {
-                    animFrameCounter = 0;
+                    animFrameCounter = 0.0f;
                 }
-                UpdateModelAnimation(playerModel, playerAnimations[currentAnimIndex], animFrameCounter);
+                UpdateModelAnimation(playerModel, playerAnimations[currentAnimIndex], (int)animFrameCounter);
             }
         }
 
@@ -438,13 +441,9 @@ int main() {
                 isAirborne = true;
             }
 
-            // ==========================================
-            // 🔥 إصلاح الانفجار الرياضي (طيران الكاميرا) 🔥
-            // ==========================================
             Vector3 idealTargetPos = { playerPos.x, playerPos.y + 1.5f, playerPos.z };
 
             if (isFirstFrame) {
-                // وضع الكاميرا فوراً في الفريم الأول بدون Lerp
                 currentCameraTarget = idealTargetPos;
                 camera.position = { 
                     currentCameraTarget.x + cameraDist * sinf(currentCameraYaw) * cosf(currentCameraPitch), 
@@ -453,9 +452,8 @@ int main() {
                 };
                 camera.target = currentCameraTarget;
                 isFirstFrame = false;
-                continue; // تخطي باقي حسابات الكاميرا لهذا الفريم
+                continue; 
             } else {
-                // قفل الأمان fminf لمنع تجاوز الرقم 1.0
                 currentCameraTarget = Vector3Lerp(currentCameraTarget, idealTargetPos, fminf(20.0f * delta, 1.0f)); 
             }
 
@@ -478,7 +476,6 @@ int main() {
                 }
             }
 
-            // قفل الأمان fminf الثاني للكاميرا
             camera.position = Vector3Lerp(camera.position, targetCamPos, fminf(30.0f * delta, 1.0f));
             camera.target = currentCameraTarget;
         }
